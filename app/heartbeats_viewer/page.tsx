@@ -1,12 +1,16 @@
 import { requireUser } from '@/lib/auth';
+import { dashboardUrl, HEARTBEATS_DASHBOARD, toPeriod } from '@/lib/kibana';
+import PeriodSelector from '@/components/PeriodSelector';
 
-const DASHBOARD = 'https://atlas-kibana.mwt2.org:5601/s/aaas/app/dashboards?auth_provider_hint=anonymous1#/view/cf438520-2afb-11ed-afcf-d91dad577662?embed=true&_g=(filters%3A!()%2CrefreshInterval%3A(pause%3A!t%2Cvalue%3A0)%2Ctime%3A(from%3Anow-7d%2Cto%3Anow))&show-time-filter=true&hide-filter-bar=true';
-
-export default async function HeartbeatsViewer() {
+export default async function HeartbeatsViewer({ searchParams }: { searchParams: Promise<{ period?: string }> }) {
   await requireUser();
+  const period = toPeriod((await searchParams).period);
   return (
-    <div className="container-fluid">
-      <iframe className="dashboard" title="Heartbeats" src={DASHBOARD} />
+    <div className="page wide">
+      <h1>Heartbeats</h1>
+      <PeriodSelector path="/heartbeats_viewer" current={period}
+        kibanaUrl={dashboardUrl(HEARTBEATS_DASHBOARD, period, false)} />
+      <iframe key={period} className="dashboard" title="Heartbeats" src={dashboardUrl(HEARTBEATS_DASHBOARD, period, true)} />
     </div>
   );
 }

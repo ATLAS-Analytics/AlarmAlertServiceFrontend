@@ -29,7 +29,6 @@
   "homepage": "https://github.com/ATLAS-Analytics/AlarmAlertServiceFrontend#readme",
   "dependencies": {
     "@elastic/elasticsearch": "^9.2.0",
-    "bootstrap": "^5.3.8",
     "iron-session": "^8.0.4",
     "next": "16.4.3",
     "react": "^19.3.0",

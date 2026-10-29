@@ -31,6 +31,21 @@ export interface UserDoc {
   created_at?: number;
 }
 
+export interface Annotation {
+  user: string;
+  text: string;
+  created_at: number;
+}
+
+export interface Alarm extends Topology {
+  created_at: number;
+  body?: string;
+  tag?: string | string[];
+  tags?: string | string[];
+  source?: Record<string, unknown>;
+  annotations?: Annotation[];
+}
+
 export function sameTopology(a: Topology, b: Topology): boolean {
   return a.category === b.category && a.subcategory === b.subcategory && a.event === b.event;
 }

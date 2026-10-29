@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import TagsInput from '@/components/TagsInput';
 import TopologyTree from '@/components/TopologyTree';
 import { sameTopology, type AlarmCategory, type Subscription, type Topology } from '@/lib/types';
 
@@ -56,16 +57,16 @@ export default function SubscriptionsEditor({ userId, alarmCategories, heartbeat
   }
 
   return (
-    <div className="row">
-      <div className="col-lg-5">
+    <div className="columns lopsided">
+      <div>
         <h2>Alarms</h2>
         <TopologyTree categories={alarmCategories} isSelected={isSelected} onToggle={toggle} />
         <h2>Heartbeats</h2>
         <TopologyTree categories={heartbeatCategories} isSelected={isSelected} onToggle={toggle} />
       </div>
-      <div className="col-lg-7">
-        <h2>Current Subscriptions</h2>
-        <table className="table table-sm align-middle">
+      <div>
+        <h2>Subscribed</h2>
+        <table className="stack">
           <thead>
             <tr>
               <th>Category</th>
@@ -77,28 +78,27 @@ export default function SubscriptionsEditor({ userId, alarmCategories, heartbeat
           </thead>
           <tbody>
             {subs.length === 0 && (
-              <tr><td colSpan={5} className="text-muted">No subscriptions. Select events on the left.</td></tr>
+              <tr><td colSpan={5} className="muted">No subscriptions yet. Pick events from the lists.</td></tr>
             )}
             {subs.map((s, i) => (
               <tr key={`${s.category}\u0000${s.subcategory}\u0000${s.event}`}>
-                <td>{s.category}</td>
-                <td>{s.subcategory}</td>
-                <td>{s.event}</td>
-                <td>
-                  <input className="form-control form-control-sm" aria-label="Tags"
-                    value={tagsToString(s.tags)} onChange={(e) => setTags(i, e.target.value)} />
+                <td data-label="Category">{s.category}</td>
+                <td data-label="Subcategory">{s.subcategory}</td>
+                <td data-label="Event">{s.event}</td>
+                <td data-label="Tags">
+                  <TagsInput topology={s} value={tagsToString(s.tags)} onChange={(v) => setTags(i, v)} />
                 </td>
                 <td>
-                  <button type="button" className="btn btn-sm btn-outline-danger" title="Unsubscribe"
-                    onClick={() => toggle([s], false)}>×</button>
+                  <button type="button" className="btn quiet" title="Unsubscribe"
+                    onClick={() => toggle([s], false)}>Remove</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        <button type="button" className="btn btn-primary" onClick={save} disabled={saving}>Update Subscriptions</button>
+        <button type="button" className="btn primary" onClick={save} disabled={saving}>Save subscriptions</button>
         {status && (
-          <div className={`alert mt-3 ${status.ok ? 'alert-success' : 'alert-danger'}`} role="status">{status.message}</div>
+          <div className={status.ok ? 'notice' : 'notice error'} role="status">{status.message}</div>
         )}
       </div>
     </div>

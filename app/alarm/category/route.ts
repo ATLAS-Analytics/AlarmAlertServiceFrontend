@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   if (missing) return missing;
 
   const category = pick(b, fields);
-  if (await hasAlarmTopology(category)) {
+  if (await hasAlarmTopology(category, true)) {
     return text('Already registered. Use PATCH to edit it.\n');
   }
 

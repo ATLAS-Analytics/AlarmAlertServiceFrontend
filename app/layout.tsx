@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from 'next';
-import 'bootstrap/dist/css/bootstrap.min.css';
 import './globals.css';
 import Navigation from '@/components/Navigation';
 import Footer from '@/components/Footer';
@@ -12,7 +11,14 @@ export const metadata: Metadata = {
   authors: [{ name: 'Ilija Vukotic' }],
 };
 
-export const viewport: Viewport = { width: 'device-width', initialScale: 1 };
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#121212' },
+  ],
+};
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const loggedIn = (await getUser()) !== undefined;
@@ -20,7 +26,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="en" translate="no">
       <body>
         <Navigation loggedIn={loggedIn} />
-        <main className="mt-3">{children}</main>
+        <main>{children}</main>
         <Footer />
       </body>
     </html>

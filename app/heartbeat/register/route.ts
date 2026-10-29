@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   if (missing) return missing;
 
   const category = pick(b, fields);
-  if (await hasHeartbeatTopology(category)) {
+  if (await hasHeartbeatTopology(category, true)) {
     return text('Already registered. Use PATCH to edit it.\n');
   }
 

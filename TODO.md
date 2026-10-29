@@ -1,11 +1,5 @@
 # TO DO list
 
-* autocomplete for site names
-* restyle it
-
-* fix typo in email field on profile page.
-* add Jira/GGUS ticket creation option (button in alarm viewer)
-* add alarm link to emails
-* add time selector to viewer and/or link to kibana.
-* add storing annotations of alarms
-* add examples to create alert using curl and python.
+* fix typo in email field on profile page. (preference labels come from PREFERENCES in config.json)
+* add Jira/GGUS ticket creation option (button on the alarm page, /alarms/[id])
+* add alarm link to emails: link to https://aaas.atlas-ml.org/alarms/<alarm _id> (done in AlarmAndAlertService)

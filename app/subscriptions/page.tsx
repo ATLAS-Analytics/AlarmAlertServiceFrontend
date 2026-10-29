@@ -10,10 +10,11 @@ export default async function Subscriptions() {
     loadUser(id), loadAlarmTopology(), loadHeartbeatTopology(),
   ]);
   if (!user) {
-    return <div className="container"><p className="alert alert-danger">Could not load your profile.</p></div>;
+    return <div className="page"><p className="notice error">Could not load your profile.</p></div>;
   }
   return (
-    <div className="container">
+    <div className="page wide">
+      <h1>Subscriptions</h1>
       <SubscriptionsEditor
         userId={id}
         alarmCategories={alarmCategories}

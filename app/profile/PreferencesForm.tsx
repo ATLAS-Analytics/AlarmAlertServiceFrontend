@@ -39,28 +39,28 @@ export default function PreferencesForm({ userId, definitions, initial }: Props)
 
   return (
     <form onSubmit={save}>
-      <ul className="list-group list-group-flush mb-3">
+      <ul className="rows">
         {Object.entries(definitions).map(([key, def]) => (
-          <li key={key} className="list-group-item d-flex align-items-center gap-3">
-            <label htmlFor={`pref-${key}`} className="flex-grow-1">{def.name}</label>
+          <li key={key}>
+            <label htmlFor={`pref-${key}`}>{def.name}</label>
             {def.type === 'boolean' && (
-              <input id={`pref-${key}`} className="form-check-input" type="checkbox"
+              <input id={`pref-${key}`} type="checkbox"
                 checked={Boolean(prefs[key])} onChange={(e) => set(key, e.target.checked)} />
             )}
             {def.type === 'number' && (
-              <input id={`pref-${key}`} className="form-control w-auto" type="number"
+              <input id={`pref-${key}`} type="number"
                 value={Number(prefs[key] ?? 0)} onChange={(e) => set(key, Number(e.target.value))} />
             )}
             {def.type === 'email' && (
-              <input id={`pref-${key}`} className="form-control w-auto" type="email"
+              <input id={`pref-${key}`} type="email"
                 value={String(prefs[key] ?? '')} onChange={(e) => set(key, e.target.value)} />
             )}
           </li>
         ))}
       </ul>
-      <button type="submit" className="btn btn-primary" disabled={saving}>Update Preferences</button>
+      <button type="submit" className="btn primary" disabled={saving}>Save preferences</button>
       {status && (
-        <div className={`alert mt-3 ${status.ok ? 'alert-success' : 'alert-danger'}`} role="status">{status.message}</div>
+        <div className={status.ok ? 'notice' : 'notice error'} role="status">{status.message}</div>
       )}
     </form>
   );

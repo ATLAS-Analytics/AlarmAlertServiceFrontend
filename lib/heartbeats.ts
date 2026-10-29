@@ -143,9 +143,12 @@ export async function loadHeartbeatTopology(): Promise<HeartbeatCategory[]> {
   return defs;
 }
 
-/** Checks the monitored categories, reloading once in case one was just registered elsewhere. */
-export async function hasHeartbeatTopology(b: Body): Promise<boolean> {
-  if (monitors().has(keyOf(b))) return true;
+/**
+ * Checks the monitored categories, reloading once in case one was just registered elsewhere.
+ * `fresh` skips the cache, e.g. before registering.
+ */
+export async function hasHeartbeatTopology(b: Body, fresh = false): Promise<boolean> {
+  if (!fresh && monitors().has(keyOf(b))) return true;
   await loadHeartbeatTopology();
   return monitors().has(keyOf(b));
 }

@@ -1,29 +1,35 @@
-import Image from 'next/image';
+'use client';
+
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+
+function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const current = usePathname() === href ? 'page' : undefined;
+  return <Link href={href} aria-current={current}>{children}</Link>;
+}
 
 export default function Navigation({ loggedIn }: { loggedIn: boolean }) {
   return (
-    <nav id="mainNav" className="navbar navbar-dark bg-dark sticky-top px-2">
-      <a className="navbar-brand" href="https://github.com/ATLAS-Analytics">
-        <Image className="d-inline-block align-top" src="/images/a%26a.png" width={125} height={65} alt="Alarm & Alert" priority />
-      </a>
-      <div className="nav me-auto">
-        <Link className="nav-link" href="/">Home</Link>
-        <Link className="nav-link" href="/docs">Docs</Link>
-        {loggedIn && (
-          <>
-            <Link className="nav-link" href="/viewer">Alarms</Link>
-            <Link className="nav-link" href="/heartbeats_viewer">Heartbeats</Link>
-            <Link className="nav-link" href="/subscriptions">Subscriptions</Link>
-          </>
-        )}
+    <header className="site-header">
+      <div className="page wide">
+        <Link className="brand" href="/">Alarm &amp; Alert</Link>
+        <nav className="nav" aria-label="Main">
+          <NavLink href="/docs">Docs</NavLink>
+          {loggedIn && (
+            <>
+              <NavLink href="/viewer">Alarms</NavLink>
+              <NavLink href="/heartbeats_viewer">Heartbeats</NavLink>
+              <NavLink href="/subscriptions">Subscriptions</NavLink>
+            </>
+          )}
+        </nav>
+        <div className="nav account">
+          {loggedIn
+            ? <NavLink href="/profile">Profile</NavLink>
+            // route handler, not a page: plain anchor so the browser does a full request.
+            : <a href="/login">Log in</a>}
+        </div>
       </div>
-      <div className="nav">
-        {loggedIn
-          ? <Link className="nav-link" href="/profile">Profile</Link>
-          // route handlers, not pages: plain anchors so the browser does a full request.
-          : <a className="nav-link" href="/login">Login</a>}
-      </div>
-    </nav>
+    </header>
   );
 }

@@ -39,11 +39,11 @@ function groupBy<T>(items: T[], key: (t: T) => string): Map<string, T[]> {
 
 /** Collapsible category → subcategory → event tree with tri-state checkboxes. */
 export default function TopologyTree({ categories, isSelected, onToggle }: Props) {
-  if (categories.length === 0) return <p className="text-muted">None registered.</p>;
+  if (categories.length === 0) return <p className="muted">None registered.</p>;
   const sorted = [...categories].sort((a, b) => `${a.category}/${a.subcategory}/${a.event}`
     .localeCompare(`${b.category}/${b.subcategory}/${b.event}`));
   return (
-    <div className="topology-tree mb-4">
+    <div className="topology-tree">
       <ul>
         {[...groupBy(sorted, (c) => c.category)].map(([category, inCategory]) => (
           <li key={category}>

@@ -36,9 +36,11 @@ jobs:
             ivukotic/aaasf:${{ steps.vars.outputs.short_sha }}
 
       - name: Repository Dispatch
-        uses: peter-evans/repository-dispatch@v4
-        with:
-          token: ${{ secrets.AAAS_GITOPS_DEPLOY_TRIGGER }}
-          repository: maniaclab/flux_apps
-          event-type: gitops-aaasf-app-trigger
-          client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}", "short_sha": "${{ steps.vars.outputs.short_sha }}"}'
+        env:
+          GH_TOKEN: ${{ secrets.AAAS_GITOPS_DEPLOY_TRIGGER }}
+        run: |
+          gh api repos/maniaclab/flux_apps/dispatches \
+            -f event_type=gitops-aaasf-app-trigger \
+            -f "client_payload[ref]=${{ github.ref }}" \
+            -f "client_payload[sha]=${{ github.sha }}" \
+            -f "client_payload[short_sha]=${{ steps.vars.outputs.short_sha }}"

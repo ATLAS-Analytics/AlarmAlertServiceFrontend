@@ -1,81 +1,56 @@
-extends ./index.pug
+extends ./layout.pug
+
+block title
+  | Profile · Alarm & Alert Service
 
 block content
-    .container
-        .row
-            .col-lg-5.mx-auto
-                h1 Profile  
-                dl 
-                    dt Name:
-                    dd #{user}
-                    dt Email:
-                    dd #{email}
-                    dt Organization:
-                    dd #{affiliation}
-                button#logout_button.btn.btn-primary Logout 
-                            
-            .col-lg-6.mx-auto
-                h1 Preferences
-                ul#pref_ul.list-group.list-group-flush    
-                    each val, key in config
-                        li.list-group-item #{val.name} &nbsp;
-                            if val.type==='boolean'
-                                input.prefs( id=key type='checkbox' width='20px' checked=preferences[key] )
-                            if val.type==='number'
-                                input.prefs( id=key type='number' width='20px' value=preferences[key] )
-                            if val.type==='email'
-                                input.prefs( id=key type='email' width='20px' value=preferences[key] )
-                button#update_preferences_button.btn.btn-primary Update Preferences
+  .page-header
+    div
+      h1 Profile
+      p.page-lead Your account and how you’d like to receive alerts.
 
-block extra_scripts
+  .profile-layout
+    section.panel.account
+      .account-head
+        - const initials = (user || email || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
+        .avatar.avatar-lg= initials
+        div
+          .account-name= user
+          .muted= email
+      dl.kv
+        div
+          dt Organization
+          dd= affiliation || '—'
+        div
+          dt Username
+          dd= username || '—'
+      a.btn.btn-secondary.btn-block(href='/logout')
+        +icon('log-out')
+        | Sign out
 
-    script.
-        function isValidEmail(email) {
-            var re = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
-            return re.test(String(email).toLowerCase());
-        }
+    section.panel
+      .panel-head
+        h2 Notification preferences
+      form#prefs-form.prefs-form(novalidate)
+        each val, key in config
+          .pref-row
+            if val.type === 'boolean'
+              label.pref-label(for=key)= val.name
+              label.switch
+                input.prefs(id=key name=key type='checkbox' checked=preferences[key])
+                span.switch-track(aria-hidden='true')
+            else if val.type === 'number'
+              label.pref-label(for=key)= val.name
+              input.input.input-number.prefs(id=key name=key type='number' value=preferences[key])
+            else if val.type === 'email'
+              .pref-label
+                label(for=key)= val.name
+                span.pref-hint Leave empty to use #{email}
+              input.input.prefs(id=key name=key type='email' value=preferences[key] placeholder=email)
+        .form-actions
+          button.btn.btn-primary#save-prefs(type='submit' disabled) Save preferences
 
-    script.
-        (  function () {
-            $('#update_preferences_button').click((event) => {
-                event.preventDefault();
-                console.log('Update preferences called');
-                const data = {};
-                var prefs = document.getElementsByClassName("prefs");
-                for (var i = 0; i < prefs.length; i++) {
-                    if (prefs[i].type === 'checkbox' ){
-                        data[prefs[i].id]=prefs[i].checked;
-                    }
-                    if (prefs[i].type === 'number' ){
-                        data[prefs[i].id]=Number(prefs[i].value);
-                    }
-                    if (prefs[i].type === 'email'){
-                        if (prefs[i].value!=="" && isValidEmail(prefs[i].value)===false){
-                            alert(`Please input valid email.`);
-                            return;
-                        } 
-                        data[prefs[i].id]=prefs[i].value;
-                    }
-                }
-                console.log('new prefs:', data);
+  script#page-data(type='application/json')!= json({ userId })
 
-                const toSend=JSON.stringify(data);
-                console.log('toSend',toSend);
-                let jqxhr = $.ajax({
-                    type: 'post',
-                    url: '/user/preferences/#{userId}',
-                    contentType: 'application/json',
-                    data: toSend,
-                    success() {
-                        console.log('success');
-                        //window.location.href = '/profile';
-                    },
-                    error(xhr, textStatus, errorThrown) {
-                        alert(`Error code:${xhr.status}.${xhr.responseText}`);
-                        //window.location.href = '/profile';
-                    }
-                });
-                setTimeout(location.reload.bind(location), 150);
-
-            });
-        }());
+block append scripts
+  script(src='/js/profile.js' defer)

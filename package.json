@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "prestart": "npm install",
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node -r ./dev/mock-backends.js server.js"
   },
   "repository": {
     "type": "git",

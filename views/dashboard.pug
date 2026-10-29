@@ -1,0 +1,17 @@
+extends ./layout.pug
+
+block title
+  | #{dashboard.title} · Alarm & Alert Service
+
+block content
+  .page-header
+    div
+      h1= dashboard.title
+      p.page-lead= dashboard.description
+    a.btn.btn-secondary(href=dashboard.kibanaUrl target='_blank' rel='noopener')
+      | Open in Kibana
+      +icon('external')
+
+  .frame-panel
+    p.frame-loading Loading dashboard…
+    iframe(src=dashboard.embedUrl title=`${dashboard.title} dashboard`)

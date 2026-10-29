@@ -1,0 +1,40 @@
+mixin navLink(href, label)
+  a.tab(href=href class={ active: path === href } aria-current=(path === href ? 'page' : undefined))= label
+
+header.topbar
+  .topbar-inner
+    a.brand(href='/')
+      +brandMark()
+      span.brand-name Alarm & Alert
+
+    if loggedIn
+      nav.tabs(aria-label='Main')
+        +navLink('/subscriptions', 'Subscriptions')
+        +navLink('/viewer', 'Alarms')
+        +navLink('/heartbeats_viewer', 'Heartbeats')
+
+    .topbar-actions
+      a.icon-btn(href='/docs' title='Documentation' aria-label='Documentation' class={ active: path === '/docs' })
+        +icon('book')
+
+      if loggedIn
+        - const displayName = currentUser.name || currentUser.username || currentUser.email || ''
+        - const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?'
+        details.menu
+          summary.avatar(aria-label='Account menu' title=displayName)= initials
+          .menu-panel(role='menu')
+            .menu-header
+              strong= displayName
+              if currentUser.email
+                span= currentUser.email
+            a.menu-item(href='/profile' role='menuitem')
+              +icon('user')
+              | Profile & preferences
+            a.menu-item(href='/docs' role='menuitem')
+              +icon('book')
+              | Documentation
+            a.menu-item(href='/logout' role='menuitem')
+              +icon('log-out')
+              | Sign out
+      else
+        a.btn.btn-primary.btn-sm(href='/') Sign in

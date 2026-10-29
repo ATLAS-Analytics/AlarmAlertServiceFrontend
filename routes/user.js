@@ -42,10 +42,11 @@ async function loadUser(userId = null) {
       console.log('User found.');
       const obj = response.hits.hits[0]._source;
       // make sure all preferences are there
+      obj.preferences = obj.preferences || {};
       Object.entries(config.PREFERENCES).forEach(([key, value]) => {
         // console.log(`${key}: ${value}`);
         if (!(key in obj.preferences)) {
-          [, obj.preferences[key]] = value;
+          obj.preferences[key] = value.default_value;
         }
       });
       console.debug(obj.user);
@@ -83,8 +84,8 @@ async function writeUser(u) {
         created_at: new Date().getTime(),
       },
     });
-    console.log('response', response.body);
-    if (response.body.result === 'created') {
+    console.log('response', response);
+    if (response.result === 'created') {
       console.log('New user indexed.');
       return true;
     }
@@ -117,12 +118,13 @@ router.get('/:userId', async (req, res) => {
   res.json(await loadUser(userId));
 });
 
-router.delete('/:userId', (req, res) => {
+router.delete('/:userId', async (req, res) => {
   const {
     userId
   } = req.params;
   console.log('Deleting user with id:', userId);
-  es.deleteByQuery({
+  try {
+    const response = await es.deleteByQuery({
       index: esUsersIndex,
       refresh: true,
       body: {
@@ -132,21 +134,17 @@ router.delete('/:userId', (req, res) => {
           }
         }
       },
-    },
-    (err, response) => {
-      if (err) {
-        console.error(err);
-        res.status(500).send('Error in deleting user.');
-        return;
-      }
-      if (response.deleted === 1) {
-        res.status(200).send('OK');
-        return;
-      }
-      console.log(response);
-      res.status(500).send('No user with that ID.');
-    },
-  );
+    });
+    if (response.deleted === 1) {
+      res.status(200).send('OK');
+      return;
+    }
+    console.log(response);
+    res.status(500).send('No user with that ID.');
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Error in deleting user.');
+  }
 });
 
 router.post('/preferences/:userId', jsonParser, async (req, res) => {
@@ -172,25 +170,24 @@ router.post('/preferences/:userId', jsonParser, async (req, res) => {
     res.status(400).send(disallowed);
     return;
   }
-  es.update({
-    index: esUsersIndex,
-    id: userId,
-    refresh: true,
-    body: {
-      doc: {
-        preferences: b,
+  try {
+    const response = await es.update({
+      index: esUsersIndex,
+      id: userId,
+      refresh: true,
+      body: {
+        doc: {
+          preferences: b,
+        },
       },
-    },
-  }, (err, response) => {
-    if (err) {
-      console.error('cant update user preferences:\n', err);
-      res.status(500).send(`something went wrong:\n${err}`);
-      return;
-    }
+    });
     console.log('User preferences updated.');
-    console.debug(response.body);
+    console.debug(response);
     res.status(200).send('OK');
-  });
+  } catch (err) {
+    console.error('cant update user preferences:\n', err);
+    res.status(500).send(`something went wrong:\n${err}`);
+  }
 });
 
 router.post('/subscriptions/:userId', jsonParser, async (req, res) => {
@@ -199,31 +196,31 @@ router.post('/subscriptions/:userId', jsonParser, async (req, res) => {
   } = req.params;
   const b = req.body;
   console.log(`Updating subscriptions for user ${userId} with body:\n`, b);
-  if (b === undefined || b === null || Object.keys(b).length === 0) {
-    res.status(400).send('nothing POSTed.\n');
+  // an empty array is valid: it unsubscribes from everything
+  if (!Array.isArray(b)) {
+    res.status(400).send('expected a JSON array of subscriptions.\n');
     return;
   }
   // TODO console.log('Check that only allowed things are in.');
   // TODO check subscription not already there.
-  es.update({
-    index: esUsersIndex,
-    id: userId,
-    refresh: true,
-    body: {
-      doc: {
-        subscriptions: b,
+  try {
+    const response = await es.update({
+      index: esUsersIndex,
+      id: userId,
+      refresh: true,
+      body: {
+        doc: {
+          subscriptions: b,
+        },
       },
-    },
-  }, (err, response) => {
-    if (err) {
-      console.error('cant update user subscriptions:\n', err);
-      res.status(500).send(`something went wrong:\n${err}`);
-      return;
-    }
+    });
     console.log('User subscriptions updated.');
-    console.debug(response.body);
+    console.debug(response);
     res.status(200).send('OK');
-  });
+  } catch (err) {
+    console.error('cant update user subscriptions:\n', err);
+    res.status(500).send(`something went wrong:\n${err}`);
+  }
 });
 
 exports.router = router;

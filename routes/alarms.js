@@ -9,6 +9,12 @@ let config;
 let es;
 const categories = [];
 
+// tag suggestions for the subscriptions page: every value of alarm `tags`
+// and of `source.*site` / `source.*netsite` fields, refreshed hourly.
+const TAGS_TTL = 3600 * 1000;
+const SITE_FIELD = /sites?(_(src|dest))?$/i;
+let tagsCache = { loadedAt: 0, tags: [] };
+
 const router = express.Router();
 const jsonParser = bodyParser.json();
 
@@ -55,12 +61,55 @@ async function loadAlarmTopology() {
   }
 }
 
+async function loadAlarmTags() {
+  if (Date.now() - tagsCache.loadedAt < TAGS_TTL) return tagsCache.tags;
+  console.log('loading alarm tags...');
+  try {
+    // only keyword fields can be aggregated; with dynamic mappings that is the .keyword subfield
+    const caps = await es.fieldCaps({ index: esAlarmsIndex, fields: ['tags', 'tags.*', 'source.*'] });
+    const fields = Object.entries(caps.fields)
+      .filter(([name, types]) => {
+        const base = name.replace(/\.keyword$/, '');
+        const isTagField = base === 'tags' || (base.startsWith('source.') && SITE_FIELD.test(base));
+        return isTagField && types.keyword !== undefined && types.keyword.aggregatable;
+      })
+      .map(([name]) => name);
+    if (fields.length === 0) {
+      console.log('No tag fields found.');
+      return tagsCache.tags;
+    }
+
+    const aggs = {};
+    fields.forEach((field, i) => {
+      aggs[`f${i}`] = { terms: { field, size: 10000 } };
+    });
+    const response = await es.search({ index: esAlarmsIndex, size: 0, aggs });
+
+    const tags = new Set();
+    Object.values(response.aggregations).forEach((agg) => {
+      agg.buckets.forEach((b) => tags.add(String(b.key).trim()));
+    });
+    // alerts.py splits subscription tags on spaces, so tags containing one can never match
+    tagsCache = {
+      loadedAt: Date.now(),
+      tags: [...tags]
+        .filter((t) => t && t !== '*' && !/\s/.test(t))
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+    };
+    console.log(`loaded ${tagsCache.tags.length} tags from fields:`, fields);
+  } catch (err) {
+    console.error(err);
+  }
+  return tagsCache.tags;
+}
+
 function init(configuration) {
   config = configuration;
   config.REQUIRED_ALARM_FIELDS = config.REQUIRED_ALARM_FIELDS.concat(config.TOPOLOGY_FIELDS);
   config.REQUIRED_ALARM_TOPOLOGY_FIELDS = config.REQUIRED_ALARM_TOPOLOGY_FIELDS.concat(config.TOPOLOGY_FIELDS);
   es = new elasticsearch.Client(config.ES_HOST);
   loadAlarmTopology();
+  loadAlarmTags();
 }
 
 router.post('/', jsonParser, async (req, res) => {
@@ -114,6 +163,10 @@ router.post('/', jsonParser, async (req, res) => {
 router.get('/categories', async (req, res) => {
   await loadAlarmTopology();
   res.json(categories);
+});
+
+router.get('/tags', async (req, res) => {
+  res.json(await loadAlarmTags());
 });
 
 router.post('/fetch', jsonParser, async (req, res) => {

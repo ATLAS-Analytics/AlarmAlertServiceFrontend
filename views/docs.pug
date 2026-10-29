@@ -1,384 +1,299 @@
-extends ./index.pug
+extends ./layout.pug
+
+block title
+  | Documentation · Alarm & Alert Service
+
+mixin endpoint(id, method, path, title)
+  article.endpoint(id=id)
+    .endpoint-head
+      span.method(class=`method-${method.toLowerCase()}`)= method
+      code.endpoint-path= path
+    h4= title
+    block
 
 block content
-    .container-fluid 
-        .row.flex-xl-nowrap
+  .docs
+    nav.docs-toc(aria-label='On this page')
+      p.toc-title Documentation
+      ul
+        li: a(href='#overview') Overview
+        li: a(href='#alerts') Subscriptions & alerts
+        li
+          a(href='#publishing') Publishing alarms
+          ul
+            li: a(href='#registering') Registering an alarm
+            li: a(href='#creating') Creating alarms
+            li: a(href='#periodic') Periodic execution
+            li: a(href='#heartbeats') Heartbeats
+        li
+          a(href='#api') REST API
+          ul
+            li: a(href='#api-alarm') Alarms
+            li: a(href='#api-user') Users
+            li: a(href='#api-heartbeat') Heartbeats
 
-            .col-12.col-md-3.col-xl-2.bd-toc
-                ul.section-nav
-                    li.toc-entry.toc-h2
-                        a(href="#user") User Documentation
-                        ul 
-                            li.toc-entry.toc-h3
-                                a(href="#registering") Registering Alarm
-                            li.toc-entry.toc-h3
-                                a(href="#creation") Creating Alarm
-                            li.toc-entry.toc-h3
-                                a(href="#periodic") Periodic Execution
-                    
-                    li.toc-entry.toc-h2
-                        a(href="#rest") REST API
-                        ul 
-                            li.toc-entry.toc-h3
-                                a(href="#api_alarm") Alarm
-                                ul
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_alarm_categories") Categories
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_alarm_register") Register
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_alarm_create") Create
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_alarm_list") List
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_alarm_del_event") Delete Alarm Category
-                            li.toc-entry.toc-h3
-                                a(href="#api_user") User
-                                ul
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_user_view_all") List Users
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_user_view") Info
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_user_delete") Full unsubscribe
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_user_update_preferences") Update preferences
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_user_update_subscriptions") Update subscriptions
-                            li.toc-entry.toc-h3
-                                a(href="#api_heartbeat") Heartbeats
-                                ul
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_heartbeat_categories") Categories
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_heartbeat_register") Register
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_heartbeat_create") Create
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_heartbeat_list") List
-                                    li.toc-entry.toc-h4 
-                                        a(href="#api_heartbeat_del_event") Delete Heartbeat Category
+    article.docs-body
+      section#overview
+        h1 Documentation
+        p.docs-lead
+          | ATLAS Alarm & Alert Service provides a simple way to store generated alarms, handles user subscriptions and generates alerts.
 
+        figure.docs-figure
+          img(src='/images/AlarmAndAlert.png' alt='Alarm generators post alarms to the REST API, which stores them in Elasticsearch. Users subscribe through the web frontend and receive alerts.')
 
-            main.col-12.col-md-9.col-xl-8.py-md-3.pl-md-5.bd-content
-                h1 Documentation 
+        h3 Components
+        dl.components
+          div
+            dt Database
+            dd Elasticsearch
+          div
+            dt REST API & web frontend
+            dd Node.js, Express, Pug
+          div
+            dt Deployment
+            dd Docker, Kubernetes
+          div
+            dt Authentication
+            dd Globus (InCommon)
+          div
+            dt Authorization
+            dd API key
+          div
+            dt Mail
+            dd Mailgun
 
-                h2#user User Documentation
+      section#alerts
+        h2 Subscriptions & alerts
+        p
+          | On the #[a(href='/subscriptions') Subscriptions] page, tick the events you want to hear about.
+          | Each subscription can be narrowed down with #[strong tags], usually site or network-site names.
+          | You are alerted only about alarms that carry at least one of your tags; leave the tags empty to receive all of them.
+        p
+          | Alerts are bundled into a single email, sent every few hours according to the mail interval in your
+          | #[a(href='/profile') preferences]. Turn on vacation mode there to pause them.
 
-                p.font-weight-normal
-                    | New alarm can be created in three simple steps. First register it using REST API,
-                    | add the alarm generating code to your program, create a cron that executes your program periodically. 
-                
-                h3#registering Registering Alarm
+      section#publishing
+        h2 Publishing alarms
+        p
+          | A new alarm can be created in three simple steps: register it using the REST API,
+          | add the alarm-generating code to your program, and run your program periodically.
 
-                p.font-weight-normal
-                    | Before registering a new kind of alarm, look at the classification tree of the 
-                    a(href='/alarm/categories') #[strong current alarms]
-                    | 
-                    | and decide if there is already a category and subcategory where the new alarm would naturally fit.
-                    | Once you have decided on catagory and subcategory, you should create a small json document 
-                    | in this form: 
-                    pre 
-                        code.
-                            {
-                                "category": "Analytics",
-                                "subcategory": "Frontier",
-                                "event": "Failed queries",
-                                "description": "Code running every 1h at UC k8s cluster. Checks all servers for: Rejected queries - server is busy and doesn't respond to the query; DB disconnections - the query was processed by the Frontier server but the Oracle DB terminated the connection. The code can be found here: https://github.com/ATLAS-Analytics/AlarmAndAlertService/blob/master/frontier-failed-q.py",
-                                "template": "Servers with failed queries:\n%{servers}\n. Affected tasks: \n%{tasks}\n\tConsult the following link to get a table with the most relevant taskids https://atlas-kibana.mwt2.org:5601/s/frontier/goto/c72d263c3e2b86f394ab99211c99b613\n"
-                            }
-                    | It is really important to write the description field as detailed as possible as that will help people getting alarm know how it got generated.
-                    | The template field defines text that will appear in the alert email. 
-                    | So it should be brief, but give all the information that a person receiving it could judge how serious issue is, shoudl he/she forward it, and have enough information to either act on it, or start digging further into the issue.
-                    | All the instances of %{#[strong variable]} will be changed with values of #[em variable] field given in alarms "source" field. At this moment only simple #[em \n] and #[em \t] are available for formating. 
-                    | Once you have the json alarm description ready, you can simply post it to the Alarm And Alert Service 
-                    |
-                    a(href="#api_alarm_register") REST endpoint
-                    | .
+        h3#registering Registering an alarm
+        p
+          | Before registering a new kind of alarm, look at the classification tree of the
+          | #[a(href='/alarm/categories') current alarms] and decide whether there already is a category and subcategory where the new alarm would naturally fit.
+          | Then describe it in a small JSON document:
+        pre: code.
+          {
+            "category": "Analytics",
+            "subcategory": "Frontier",
+            "event": "Failed queries",
+            "description": "Code running every 1h at UC k8s cluster. Checks all servers for: Rejected queries - server is busy and doesn't respond to the query; DB disconnections - the query was processed by the Frontier server but the Oracle DB terminated the connection. The code can be found here: https://github.com/ATLAS-Analytics/AlarmAndAlertService/blob/master/frontier-failed-q.py",
+            "template": "Servers with failed queries:\n%{servers}\n. Affected tasks: \n%{tasks}\n\tConsult the following link to get a table with the most relevant taskids https://atlas-kibana.mwt2.org:5601/s/frontier/goto/c72d263c3e2b86f394ab99211c99b613\n"
+          }
+        p
+          | Write the #[code description] in as much detail as possible: it tells people receiving the alarm how it was generated.
+        p
+          | The #[code template] defines the text that appears in the alert email. Keep it brief, but give a reader enough to judge how serious the issue is,
+          | whether to forward it, and either act on it or start digging further.
+          | Every #[code %{variable}] is replaced with the value of #[em variable] from the alarm’s #[code source] field.
+          | Only #[code \n] and #[code \t] are available for formatting.
+        p
+          | Once the document is ready, post it to the #[a(href='#api-alarm-register') register endpoint].
 
-                h3#creation Creating Alarm
-                p.font-weight-normal
-                    | Once Alarm has been configured, you may start creating them.
-                    | Alarms are again simple JSON documents, and follow this form:
-                    pre
-                        code.
-                            { 
-                                "category" : "network",
-                                "subcategory": "perfsonar",
-                                "event": "high packet loss",
-                                "tag":"ps.sl",
-                                "body":"ps_1 needs 10000ms",
-                                "source": {
-                                    "src": "137.222.79.1", 
-                                    "avg_value": 1.0, 
-                                    "host_src": "dice-io-37-00.acrc.bris.ac.uk", 
-                                    "site_src": "UKI-SOUTHGRID-BRIS-HEP"
-                                }
-                            }
-                    | In addition to alarm classification, it contains fields: 
-                    ul 
-                        li #[em tag] - a single keyword or a short array that a user can subscribe to. This helps limit number of alerts that a user will receive.  
-                        li #[em body] - a very brief description of the event.
-                        li #[em source] - this optional field is a short map whose attributes will be placed in the alert template. 
-                    | The document should be sent to this
-                    | 
-                    a(href="#api_alarm_create") REST endpoint
-                    | .
+        h3#creating Creating alarms
+        p Once the alarm is registered, you can start creating alarms. They are simple JSON documents too:
+        pre: code.
+          {
+            "category": "network",
+            "subcategory": "perfsonar",
+            "event": "high packet loss",
+            "tags": ["UKI-SOUTHGRID-BRIS-HEP"],
+            "body": "ps_1 needs 10000ms",
+            "source": {
+              "src": "137.222.79.1",
+              "avg_value": 1.0,
+              "host_src": "dice-io-37-00.acrc.bris.ac.uk",
+              "site_src": "UKI-SOUTHGRID-BRIS-HEP"
+            }
+          }
+        p In addition to the classification, an alarm contains:
+        ul
+          li #[code tags]: a single keyword or a short array that users can subscribe to. It lets them limit the number of alerts they receive. Tags must not contain spaces.
+          li #[code body]: a very brief description of the event.
+          li #[code source]: an optional map whose attributes are placed into the alert template.
+        p Send the document to the #[a(href='#api-alarm-create') create endpoint].
 
-                h3#periodic Periodic execution
+        h3#periodic Periodic execution
+        p
+          | Alarm-generating code is typically run on a schedule, for example as a cron job, so that new conditions are detected and posted as they happen.
 
-                h2#rest REST API
-                p.font-weight-normal
-                    | There are two main parts of API. One concerning users, and one concerning alarms. 
-                    | While not in its final form, it is already usable. 
-                
-                h3#api_alarm Alarm
-                p.font-weight-normal
+        h3#heartbeats Heartbeats
+        p
+          | Heartbeats catch services that silently stop working. Register a heartbeat with an #[code interval] (seconds) and #[code min_expected] count,
+          | then have your service post heartbeats regularly. If fewer than #[code min_expected] heartbeats arrive within the interval, an alarm is raised.
+        pre: code.
+          {
+            "category": "SLATE",
+            "subcategory": "Squid",
+            "event": "server down",
+            "template": "Squid instance: %{instance}, running at %{site}, failed to send required number of heartbeats.",
+            "description": "This alarm gets generated if a squid instance does not send at least 4 heartbeats in last 60 seconds. Heartbeats are sent in 10 second intervals.",
+            "interval": 60,
+            "min_expected": 4
+          }
 
-                h4#api_alarm_categories List categories
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong GET] #[em /alarm/categories]
-                    p.font-weight-normal
-                        | returns JSON formated information on all currently registered alarm categories.
+      section#api
+        h2 REST API
+        p The API has three parts: alarms, users and heartbeats. All request and response bodies are JSON.
 
-                h4#api_alarm_register Registering Alarm
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong POST] #[em /alarm/category]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                {
-                                    "category": "",
-                                    "subcategory": "",
-                                    "event": "",
-                                    "description": "",
-                                    "template": ""
-                                }
+        h3#api-alarm Alarms
 
-                h4#api_alarm_register Editing Alarm
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong PATCH] #[em /alarm/category]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                {
-                                    "category": "",
-                                    "subcategory": "",
-                                    "event": "",
-                                    "description": "",
-                                    "template": ""
-                                }
+        +endpoint('api-alarm-categories', 'GET', '/alarm/categories', 'List categories')
+          p Returns all currently registered alarm categories.
 
-                h4#api_alarm_create Creating Alarm
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong POST] #[em /alarm/]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                {
-                                    "category" : "",
-                                    "subcategory": "",
-                                    "event": "",
-                                    "tag":"",
-                                    "body":"",
-                                    "source": {"xxx": "", "yyy": "", ...}
-                                }
-                    
-                h4#api_alarm_list List Alarms
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong POST] #[em /alarm/fetch]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                {
-                                    "category" : "",
-                                    "subcategory" : "",
-                                    "event" : "",
-                                    "period" : 6
-                                }              
+        +endpoint('api-alarm-tags', 'GET', '/alarm/tags', 'List tags')
+          p Returns every tag and site name found in stored alarms. Used for suggestions when subscribing.
 
-                h4#api_alarm_del_event Delete Alarm Category
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong DEL] #[em /alarm/]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                {
-                                    "category" : "",
-                                    "subcategory" : "",
-                                    "event" : ""
-                                }    
-                    p.font-weight-normal
-                        | Unregisters alarm event.
-                        | All alarms created are deleted. Use with caution! 
-                               
+        +endpoint('api-alarm-register', 'POST', '/alarm/category', 'Register an alarm')
+          pre: code.
+            {
+              "category": "",
+              "subcategory": "",
+              "event": "",
+              "description": "",
+              "template": ""
+            }
 
-                h3#api_user User
+        +endpoint('api-alarm-edit', 'PATCH', '/alarm/category', 'Edit an alarm')
+          pre: code.
+            {
+              "category": "",
+              "subcategory": "",
+              "event": "",
+              "description": "",
+              "template": ""
+            }
 
-                h4#api_user_view_all All Users Information
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong GET] #[em /user/]
-                    p.font-weight-normal
-                        | returns JSON formated information on all users.
+        +endpoint('api-alarm-create', 'POST', '/alarm/', 'Create an alarm')
+          pre: code.
+            {
+              "category": "",
+              "subcategory": "",
+              "event": "",
+              "tags": ["", ""],
+              "body": "",
+              "source": { "xxx": "", "yyy": "", ... }
+            }
 
-                h4#api_user_view User Information
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong GET] #[em /user/:userId]
-                    p.font-weight-normal
-                        | Returns JSON formated information on a specific user,
-                        | preferences and subscriptions.
-                
-                h4#api_user_delete Full Unsubscribe
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong DEL] #[em /user/:userId]
-                    p.font-weight-normal
-                        | completely deletes a user from system.
-            
-                h4#api_user_update_preferences Update User preferences
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong POST] #[em /user/preferences/:userId]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                {
-                                    "vacation" : true
-                                }
-                    p.font-weight-normal
-                        | Updates user preferences. 
-                        | Only preferences supported by the deployed system are allowed.
-               
-                h4#api_user_update_subscriptions Update subscriptions
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong POST] #[em /user/subscriptions/:userId]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                [
-                                    {
-                                        "category": "",
-                                        "subcategory": "",
-                                        "event": "",
-                                        "tags": ["xxx","yyy"]
-                                    },
-                                    ...
-                                ]
-                            
-                    p.font-weight-normal
-                        | Updates user subscriptions. 
-                        | Body has JSON array of all alarms user will be subscribed.
-                        | Only alarms currently configured in the system are allowed.
+        +endpoint('api-alarm-list', 'POST', '/alarm/fetch', 'List alarms')
+          p #[code period] is a number of hours.
+          pre: code.
+            {
+              "category": "",
+              "subcategory": "",
+              "event": "",
+              "period": 6
+            }
 
-                
+        +endpoint('api-alarm-delete', 'DELETE', '/alarm/', 'Delete an alarm category')
+          pre: code.
+            {
+              "category": "",
+              "subcategory": "",
+              "event": ""
+            }
+          p.warning Unregisters the alarm event. Use with caution!
 
-                h3#api_heartbeat Heartbeat
+        h3#api-user Users
 
-                h4#api_heartbeat_categories List Categories
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong GET] #[em /heartbeat/categories]
-                    p.font-weight-normal
-                        | returns JSON formated information on all currently registered heartbeat categories.
+        +endpoint('api-user-list', 'GET', '/user/', 'List users')
+          p Returns information on all users.
 
-                h4#api_heartbeat_register Registering heartbeat
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong POST] #[em /heartbeat/register]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                {
-                                    "category": "",
-                                    "subcategory": "",
-                                    "event": "",
-                                    "description": "",
-                                    "template": "",
-                                    "interval": 60,
-                                    "min_expected": 4
-                                }
+        +endpoint('api-user-info', 'GET', '/user/:userId', 'User information')
+          p Returns information on a specific user, including preferences and subscriptions.
 
-                h4#api_heartbeat_register Editing heartbeat
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong PATCH] #[em /heartbeat/]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                {
-                                    "category": "",
-                                    "subcategory": "",
-                                    "event": "",
-                                    "description": "",
-                                    "template": "",
-                                    "interval": 60,
-                                    "min_expected": 4
-                                }
+        +endpoint('api-user-delete', 'DELETE', '/user/:userId', 'Full unsubscribe')
+          p Completely deletes a user from the system.
 
-                h4#api_heartbeat_create Creating heartbeat
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong POST] #[em /heartbeat/]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                {
-                                    "category" : "",
-                                    "subcategory": "",
-                                    "event": "",
-                                    "tag":["",""],
-                                    "body":"",
-                                    "source": {"xxx": "", "yyy": "", ...}
-                                }
-                    
-                h4#api_heartbeat_list List heartbeats
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong POST] #[em /heartbeat/fetch]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                {
-                                    "category" : "",
-                                    "subcategory" : "",
-                                    "event" : "",
-                                    "period" : 6
-                                }              
+        +endpoint('api-user-preferences', 'POST', '/user/preferences/:userId', 'Update preferences')
+          pre: code.
+            {
+              "vacation": true
+            }
+          p Only preferences supported by the deployed system are allowed.
 
-                h4#api_heartbeat_del_event Delete heartbeat Category
-                div(style="margin:20px;")
-                    p.font-weight-normal
-                        | #[strong DEL] #[em /heartbeat/]
-                    p.font-weight-normal
-                        | BODY raw(JSON)
-                        pre
-                            code. 
-                                {
-                                    "category" : "",
-                                    "subcategory" : "",
-                                    "event" : ""
-                                }    
-                    p.font-weight-normal
-                        | Unregisters heartbeat event.
-                        | All heartbeats created are deleted. Use with caution! 
-                               
+        +endpoint('api-user-subscriptions', 'POST', '/user/subscriptions/:userId', 'Update subscriptions')
+          pre: code.
+            [
+              {
+                "category": "",
+                "subcategory": "",
+                "event": "",
+                "tags": "MWT2 AGLT2"
+              },
+              ...
+            ]
+          p
+            | The body is the complete list of the user’s subscriptions; an empty array unsubscribes from everything.
+            | #[code tags] is a space-separated string, or #[code "*"] for all.
+
+        h3#api-heartbeat Heartbeats
+
+        +endpoint('api-heartbeat-categories', 'GET', '/heartbeat/', 'List heartbeats')
+          p Returns all registered heartbeats.
+
+        +endpoint('api-heartbeat-register', 'POST', '/heartbeat/register', 'Register a heartbeat')
+          pre: code.
+            {
+              "category": "",
+              "subcategory": "",
+              "event": "",
+              "description": "",
+              "template": "",
+              "interval": 60,
+              "min_expected": 4
+            }
+
+        +endpoint('api-heartbeat-edit', 'PATCH', '/heartbeat/', 'Edit a heartbeat')
+          pre: code.
+            {
+              "category": "",
+              "subcategory": "",
+              "event": "",
+              "description": "",
+              "template": "",
+              "interval": 60,
+              "min_expected": 4
+            }
+
+        +endpoint('api-heartbeat-create', 'POST', '/heartbeat/', 'Send a heartbeat')
+          pre: code.
+            {
+              "category": "",
+              "subcategory": "",
+              "event": "",
+              "source": { "site": "MWT2", "instance": "MWT2_Slate_01" }
+            }
+
+        +endpoint('api-heartbeat-list', 'POST', '/heartbeat/fetch', 'List received heartbeats')
+          p #[code period] is a number of hours.
+          pre: code.
+            {
+              "category": "",
+              "subcategory": "",
+              "event": "",
+              "period": 6
+            }
+
+        +endpoint('api-heartbeat-delete', 'DELETE', '/heartbeat/', 'Delete a heartbeat')
+          pre: code.
+            {
+              "category": "",
+              "subcategory": "",
+              "event": ""
+            }
+          p.warning Unregisters the heartbeat. Use with caution!
+
+block append scripts
+  script(src='/js/docs.js' defer)

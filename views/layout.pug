@@ -1,0 +1,26 @@
+include ./partials/icons.pug
+
+doctype html
+html(lang='en')
+  head
+    meta(charset='utf-8')
+    meta(name='viewport' content='width=device-width, initial-scale=1')
+    meta(http-equiv='Content-Security-Policy' content="default-src 'self'; img-src 'self' data:; frame-src https://*.mwt2.org:5601; object-src 'none'; base-uri 'self'")
+    meta(name='color-scheme' content='light dark')
+    meta(name='description' content='Subscribe to ATLAS alarms and get alerted when something needs your attention.')
+    meta(name='author' content='Ilija Vukotic')
+    title
+      block title
+        | Alarm & Alert Service
+    link(rel='icon' href='/images/favicon.ico' sizes='64x64')
+    link(rel='icon' href='/images/favicon.svg' type='image/svg+xml')
+    link(rel='apple-touch-icon' href='/images/apple-touch-icon.png')
+    link(rel='stylesheet' href='/css/app.css')
+  body
+    block body
+      include ./partials/topbar.pug
+      main.page
+        block content
+
+    block scripts
+      script(src='/js/app.js' defer)

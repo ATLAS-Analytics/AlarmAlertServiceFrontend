@@ -1,0 +1,34 @@
+//- Line icons (24px grid, stroke = currentColor)
+mixin icon(name)
+  svg.icon(viewBox='0 0 24 24' aria-hidden='true' focusable='false')&attributes(attributes)
+    case name
+      when 'book'
+        path(d='M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20')
+      when 'search'
+        circle(cx='11' cy='11' r='7')
+        path(d='m20 20-3.5-3.5')
+      when 'arrow-right'
+        path(d='M5 12h14')
+        path(d='m12 5 7 7-7 7')
+      when 'external'
+        path(d='M15 3h6v6')
+        path(d='M10 14 21 3')
+        path(d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6')
+      when 'log-out'
+        path(d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4')
+        path(d='m16 17 5-5-5-5')
+        path(d='M21 12H9')
+      when 'user'
+        path(d='M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2')
+        circle(cx='12' cy='7' r='4')
+      when 'alert'
+        circle(cx='12' cy='12' r='10')
+        path(d='M12 8v4')
+        path(d='M12 16h.01')
+
+//- Logo: a signal radiating outward, green → amber → red (same as /images/logo.svg)
+mixin brandMark(size)
+  svg.brand-mark(class=size ? `brand-mark-${size}` : undefined viewBox='0 0 32 32' aria-hidden='true' focusable='false')
+    circle(cx='7' cy='25' r='4' fill='#2fbf71')
+    path(d='M18 25 A11 11 0 0 0 7 14' fill='none' stroke='#ffb400' stroke-width='4' stroke-linecap='round')
+    path(d='M27 25 A20 20 0 0 0 7 5' fill='none' stroke='#ff3b30' stroke-width='4' stroke-linecap='round')

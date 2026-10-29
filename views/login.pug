@@ -1,0 +1,30 @@
+extends ./layout.pug
+
+block title
+  | Sign in · Alarm & Alert Service
+
+block body
+  main.login
+    .login-card
+      +brandMark('lg')
+      h1 Alarm & Alert Service
+      p.login-lead
+        | Get notified about the ATLAS alarms that matter to you. Subscribe to events and narrow them down to the sites you care about.
+
+      if error
+        .notice.notice-error(role='alert')
+          +icon('alert')
+          span Sign-in didn’t complete. Please try again.
+
+      a.btn.btn-primary.btn-lg.btn-block(href=next ? `/login?next=${encodeURIComponent(next)}` : '/login')
+        | Sign in with Globus
+        +icon('arrow-right')
+      p.login-hint Uses your institutional identity through Globus.
+
+    footer.login-footer
+      nav
+        a(href='/docs') Documentation
+        a(href='https://github.com/ATLAS-Analytics/AlarmAlertServiceFrontend' rel='noopener') GitHub
+      p © University of Chicago · Supported by the Enrico Fermi Institute
+
+block scripts

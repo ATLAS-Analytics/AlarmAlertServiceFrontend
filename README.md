@@ -2,7 +2,23 @@
 
 [![Build ATLAS Alarm and Alert Frontend image](https://github.com/ATLAS-Analytics/AlarmAlertServiceFrontend/actions/workflows/main.yaml/badge.svg)](https://github.com/ATLAS-Analytics/AlarmAlertServiceFrontend/actions/workflows/main.yaml)
 
-REST interface and frontend
+REST interface and frontend. Next.js (App Router) + TypeScript.
+
+## Development
+
+```sh
+npm install
+# config.json and globus-config.json are read from /etc/aaasf by default
+AAASF_CONFIG_DIR=./kube/secrets npm run dev
+npm run lint && npm run typecheck && npm run build
+```
+
+* `app/` - pages, and REST endpoints as route handlers (`route.ts`)
+* `lib/` - Elasticsearch access, config, session, heartbeat monitor
+* `instrumentation.ts` - starts heartbeat monitoring when the server starts
+
+Login sessions are kept in an encrypted cookie. Its key comes from `SESSION_SECRET` (env or config.json),
+falling back to a value derived from the Globus client secret.
 
 ## Elasticsearch
 

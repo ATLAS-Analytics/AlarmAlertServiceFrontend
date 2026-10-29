@@ -1,16 +1,28 @@
-FROM node:22
+FROM node:22 AS builder
 
-LABEL maintainer Ilija Vukotic <ivukotic@cern.ch>
+LABEL maintainer="Ilija Vukotic <ivukotic@cern.ch>"
 
-# Create app directory
 WORKDIR /usr/src/app
 
 COPY package*.json ./
-# COPY start.sh ./
-RUN npm install
+RUN npm ci
 
 COPY . .
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+FROM node:22-slim AS runner
+
+WORKDIR /usr/src/app
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=80 \
+    HOSTNAME=0.0.0.0
+
+COPY --from=builder /usr/src/app/.next/standalone ./
+COPY --from=builder /usr/src/app/.next/static ./.next/static
+COPY --from=builder /usr/src/app/public ./public
 
 EXPOSE 80
 
-CMD [ "npm","start" ]
+CMD [ "node", "server.js" ]

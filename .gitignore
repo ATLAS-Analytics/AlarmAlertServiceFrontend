@@ -73,3 +73,7 @@ typings/
 
 # next.js build output
 .next
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts

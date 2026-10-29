@@ -1,0 +1,57 @@
+.lead {
+  font-size: 1rem;
+}
+
+hr {
+  width: 80%;
+  color: white;
+  background-color: #f8f9fa !important;
+}
+
+.navbar {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.navbar .nav-link {
+  font-size: 24px;
+  color: white;
+}
+
+.navbar-brand {
+  height: 65px;
+  padding: 0;
+}
+
+iframe {
+  border: 0;
+  width: 100%;
+}
+
+iframe.dashboard {
+  height: 1200px;
+}
+
+/* subscription trees */
+.topology-tree ul {
+  list-style: none;
+  padding-left: 1.5rem;
+  margin: 0;
+}
+
+.topology-tree > ul {
+  padding-left: 0;
+}
+
+.topology-tree summary {
+  cursor: pointer;
+}
+
+.topology-tree label {
+  cursor: pointer;
+  padding: 0.15rem 0;
+}
+
+.topology-tree input[type='checkbox'] {
+  margin-right: 0.4rem;
+}

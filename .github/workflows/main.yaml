@@ -12,6 +12,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Set short SHA
+        id: vars
+        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Login to Docker Hub
         uses: docker/login-action@v4
         with:
@@ -29,6 +33,7 @@ jobs:
           tags: |
             ivukotic/aaasf:latest
             ivukotic/aaasf:${{ github.sha }}
+            ivukotic/aaasf:${{ steps.vars.outputs.short_sha }}
 
       - name: Repository Dispatch
         uses: peter-evans/repository-dispatch@v4
@@ -36,4 +41,4 @@ jobs:
           token: ${{ secrets.AAAS_GITOPS_DEPLOY_TRIGGER }}
           repository: maniaclab/flux_apps
           event-type: gitops-aaasf-app-trigger
-          client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
+          client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}", "short_sha": "${{ steps.vars.outputs.short_sha }}"}'

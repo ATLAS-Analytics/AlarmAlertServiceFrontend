@@ -1,7 +1,6 @@
 # TO DO list
 
 * rewrite in TS and next.js
-* update github actions
 * autocomplete for site names
 * restyle it
 

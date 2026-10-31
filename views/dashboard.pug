@@ -7,10 +7,19 @@ block content
   .page-header
     div
       h1= dashboard.title
-      p.page-lead= dashboard.description
-    a.btn.btn-secondary(href=dashboard.kibanaUrl target='_blank' rel='noopener')
-      | Open in Kibana
-      +icon('external')
+      p.page-lead
+        | #{dashboard.description}
+        if noSubscriptions
+          |
+          | #[a(href='/subscriptions') Choose events →]
+    .page-actions
+      if scope
+        nav.segmented(aria-label='Which alarms')
+          a.seg(href='/viewer' aria-current=(scope.showAll ? undefined : 'page')) Your subscriptions
+          a.seg(href='/viewer?show=all' aria-current=(scope.showAll ? 'page' : undefined)) All alarms
+      a.btn.btn-secondary(href=dashboard.kibanaUrl target='_blank' rel='noopener')
+        | Open in Kibana
+        +icon('external')
 
   .frame-panel
     p.frame-loading Loading dashboard…

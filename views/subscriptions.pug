@@ -9,6 +9,14 @@ block content
       h1 Subscriptions
       p.page-lead Pick the events you want alerts for. Add site tags to hear only about the sites you care about.
 
+  section.panel.issues(aria-labelledby='issues-title')
+    .panel-head
+      h2#issues-title
+        | Ongoing issues
+        span.count-badge#issues-count
+      span.issues-window Your subscriptions · last #{pageData.ongoingHours} h
+    #issues-list.issues-list(aria-live='polite')
+
   .subs-layout
     section.panel.catalog(aria-labelledby='catalog-title')
       .panel-head
@@ -20,9 +28,11 @@ block content
           button.seg(type='button' role='tab' data-source='heartbeats' aria-selected='false')
             | Heartbeats
             span.seg-count(data-count='heartbeats')
-      label.search
-        +icon('search')
-        input#catalog-search(type='search' placeholder='Search events' autocomplete='off' aria-label='Search events')
+      .catalog-tools
+        label.search
+          +icon('search')
+          input#catalog-search(type='search' placeholder='Search events' autocomplete='off' aria-label='Search events')
+        button.btn.btn-ghost.btn-sm#expand-all(type='button') Expand all
       #catalog-tree.tree(aria-label='Events')
 
     section.panel.mine(aria-labelledby='mine-title')

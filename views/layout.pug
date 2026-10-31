@@ -22,5 +22,8 @@ html(lang='en')
       main.page
         block content
 
+    if devBanner
+      .dev-badge(role='note')= devBanner
+
     block scripts
       script(src='/js/app.js' defer)

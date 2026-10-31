@@ -1,4 +1,5 @@
-// Local development without Elasticsearch or Globus: `npm run dev`, then open http://localhost:8080.
+// Local development on SAMPLE data, without Elasticsearch or Globus: `npm run dev:mock`, then
+// open http://localhost:8080. For the real data use `npm run dev` (dev/real-backends.js).
 // Preloaded before server.js; stubs the config files, Elasticsearch (in-memory data below),
 // the Globus login (signs you in as "Test User") and moves port 80 to 8080.
 // http://localhost:8082 shows the in-memory data, e.g. what the subscriptions page saved.
@@ -59,6 +60,9 @@ const categories = [
   net('Infrastructure', 'hosts not found', 'perfSONAR hosts registered in CRIC that do not report measurements.'),
   net('RENs', 'path changed', 'The route between two sites changed compared to its usual path.'),
   net('RENs', 'ASN path anomalies', 'An unusual autonomous system appears on a path.'),
+  {
+    category: 'Networking', subcategory: 'Network', event: 'suspected path element', description: 'A network element suspected of degrading several paths.', template: 'x',
+  },
   { category: 'Analytics', subcategory: 'Frontier', event: 'Failed queries', description: 'Code running every 1h at UC k8s cluster. Checks all servers for rejected queries and DB disconnections.', template: 'x' },
   { category: 'Analytics', subcategory: 'Frontier', event: 'Bad SQL queries', description: 'Queries that took too long or returned too much data.', template: 'x' },
   { category: 'Analytics', subcategory: 'Elasticsearch', event: 'cluster status', description: 'Elasticsearch cluster is not green.', template: 'x' },
@@ -77,14 +81,43 @@ const psNetsites = ['BNL-ATLAS-LHCOPN', 'CERN-PROD-LHCONE', 'FZK-LCG2-LHCOPN', '
   'RAL-LCG2-LHCOPN', 'SARA-MATRIX-LHCOPN', 'TRIUMF-LCG2-LHCOPN', 'pic-LHCOPN', 'KIT-LHCONE', 'JINR-T1-LHCOPN', 'IHEP-LHCONE',
   'NCBJ-CIS', 'UKI-SCOTGRID-GLASGOW', 'UKI-NORTHGRID-LANCS-HEP', 'IFCA-LCG2', 'CYFRONET-LCG2', 'GoeGrid', 'INFN-LNF', 'INFN-ROMA1'];
 const aggValues = {
-  'tags.keyword': [...sites, ...netsites, 'University of Nowhere', '*'],
+  'tags.keyword': [...sites, ...netsites, 'AS2200', 'AS513', 'University of Nowhere', '*'],
   'source.src_site.keyword': sites.slice(0, 20),
   'source.dest_netsite': netsites,
   'source.site': ['MWT2', 'AGLT2', 'SiteOnlyInSource'],
   src_netsite: psNetsites,
   dest_netsite: psNetsites.slice(5),
   src_site: sites.slice(10),
+  // networks on traceroute paths; 0 marks an unknown hop
+  asns: [513, 2200, 39590, 786, 3, 0],
 };
+// ps_asns_1: network owner by ASN
+const asnOwners = {
+  513: 'CERN, CH', 2200: 'FR-RENATER Reseau National de telecommunications pour la Tec', 39590: 'NDGF High energy physicists community in the nordics., SE', 786: 'JANET Jisc Services Limited, GB', 3: 'MIT-GATEWAYS, US',
+};
+// events whose alarms carry a severity `level` (one with words, one with numbers)
+const levelData = [
+  { category: 'Networking', subcategory: 'Sites', event: 'high packet loss', levels: ['warning', 'critical'] },
+  { category: 'Networking', subcategory: 'RENs', event: 'path changed', levels: [3, 1, 2] },
+];
+// recent alarms for the "Ongoing issues" panel, covering each filtering rule
+const minutesAgo = (m) => Date.now() - m * 60000;
+const netAlarm = (subcategory, event, tags, level, m) => ({
+  category: 'Networking', subcategory, event, tags, level, created_at: minutesAgo(m),
+});
+const recentAlarms = [
+  ...[20, 80, 140, 300, 600].map((m) => netAlarm('Sites', 'high packet loss', ['MWT2', 'BNL-ATLAS'], 'critical', m)),
+  // the test user only wants 'critical' for this event, so these are left out
+  ...[30, 90].map((m) => netAlarm('Sites', 'high packet loss', ['AGLT2'], 'warning', m)),
+  ...[45, 200, 400].map((m) => netAlarm('RENs', 'path changed', ['MWT2', 'AGLT2'], 2, m)),
+  netAlarm('RENs', 'path changed', ['CERN-PROD'], 1, 50),
+  // comma-separated subscription tags never match in alerts.py, so this is left out too
+  netAlarm('Sites', 'bandwidth decreased', ['BNL-ATLAS'], undefined, 70),
+  // heartbeat alarms have no tags and can't be muted per site
+  {
+    category: 'SLATE', subcategory: 'Squid', event: 'server down', created_at: minutesAgo(15), source: { site: 'MWT2' },
+  },
+];
 const users = {
   'user-1': {
     username: 'test-user',
@@ -93,15 +126,32 @@ const users = {
     email: 'test.user@example.org',
     preferences: { vacation: false, mail_interval: 6 },
     subscriptions: [
-      { category: 'Networking', subcategory: 'Sites', event: 'high packet loss', tags: 'MWT2 AGLT2' },
+      {
+        category: 'Networking', subcategory: 'Sites', event: 'high packet loss', tags: 'MWT2 AGLT2', levels: 'critical',
+      },
       { category: 'Networking', subcategory: 'Sites', event: 'bandwidth decreased', tags: 'BNL-ATLAS,SWT2_CPB' },
       { category: 'Networking', subcategory: 'RENs', event: 'path changed', tags: '*' },
       { category: 'SLATE', subcategory: 'Squid', event: 'server down', tags: '*' },
       { category: 'Old', subcategory: 'Gone', event: 'deleted event', tags: '*' },
     ],
+    acknowledgements: [
+      {
+        category: 'Networking', subcategory: 'RENs', event: 'path changed', tag: 'CERN-PROD', created_at: minutesAgo(60), until: minutesAgo(-2 * 24 * 60),
+      },
+      // muted, but no matching alarms in the last 24 h
+      {
+        category: 'Networking', subcategory: 'Sites', event: 'high packet loss', tag: 'AGLT2', created_at: minutesAgo(600), until: minutesAgo(-5 * 24 * 60),
+      },
+      // already expired: must not be shown
+      {
+        category: 'Networking', subcategory: 'RENs', event: 'path changed', tag: 'MWT2', created_at: minutesAgo(9000), until: minutesAgo(30),
+      },
+    ],
   },
 };
 global.FAKE = { users, writes: [] };
+// shown as a badge on every page (see views/layout.pug)
+process.env.AAAS_DEV_BANNER = 'Sample data · npm run dev:mock';
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 const hits = (arr) => ({ hits: { total: { value: arr.length }, hits: arr.map((s, i) => ({ _id: String(i), _source: s })) } });
@@ -117,7 +167,28 @@ class FakeES {
     }
     if (p.index === 'aaas_categories') return hits(categories);
     if (p.index === 'aaas_heartbeats_topology') return hits(hbTopology);
-    if ((p.index === 'aaas_alarms' || p.index === 'ps_trace*') && p.aggs) {
+    if (p.index === 'aaas_alarms' && p.aggs && p.aggs.category) {
+      // nested category > subcategory > event > level aggregation (loadAlarmLevels)
+      const group = (items, field) => [...new Set(items.map((i) => i[field]))].map((key) => ({ key, items: items.filter((i) => i[field] === key) }));
+      const aggregations = {
+        category: {
+          buckets: group(levelData, 'category').map((c) => ({
+            key: c.key,
+            subcategory: {
+              buckets: group(c.items, 'subcategory').map((s) => ({
+                key: s.key,
+                event: {
+                  buckets: s.items.map((e) => ({ key: e.event, level: { buckets: e.levels.map((key) => ({ key, doc_count: 1 })) } })),
+                },
+              })),
+            },
+          })),
+        },
+      };
+      return { hits: { total: { value: 0 }, hits: [] }, aggregations };
+    }
+    if (p.index === 'aaas_alarms' && !p.aggs) return hits(recentAlarms);
+    if ((p.index === 'aaas_alarms' || p.index.startsWith('ps_trace')) && p.aggs) {
       await delay(400);
       global.FAKE.lastQuery = global.FAKE.lastQuery || {};
       global.FAKE.lastQuery[p.index] = p.query;
@@ -134,7 +205,7 @@ class FakeES {
   async fieldCaps(p) {
     const kw = { keyword: { type: 'keyword', aggregatable: true } };
     const text = { text: { type: 'text', aggregatable: false } };
-    if (p.index === 'ps_trace*') {
+    if (p.index.startsWith('ps_trace')) {
       return {
         indices: ['ps_trace'],
         fields: {
@@ -153,8 +224,16 @@ class FakeES {
         'source.site': kw,
         'source.avg_value': { float: { type: 'float', aggregatable: true } },
         'source.host_src': kw,
+        category: kw,
+        subcategory: kw,
+        event: kw,
+        level: kw,
       },
     };
+  }
+
+  async mget(p) {
+    return { docs: p.ids.map((id) => (asnOwners[id] ? { _id: id, found: true, _source: { owner: asnOwners[id] } } : { _id: id, found: false })) };
   }
 
   async index(p) {

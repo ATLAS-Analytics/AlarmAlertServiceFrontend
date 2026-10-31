@@ -8,11 +8,13 @@
 
   const ICON_X = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
   const ICON_CHEVRON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
+  const ICON_CHEVRON_DOWN = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
   const MAX_SUGGESTIONS = 100;
   const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
 
   const tree = document.getElementById('catalog-tree');
   const search = document.getElementById('catalog-search');
+  const expandAll = document.getElementById('expand-all');
   const list = document.getElementById('subs-list');
   const empty = document.getElementById('subs-empty');
   const count = document.getElementById('subs-count');
@@ -35,11 +37,17 @@
   const heartbeatKeys = new Set(data.heartbeats.map(keyOf));
   const descriptions = new Map();
   data.alarms.concat(data.heartbeats).forEach((e) => descriptions.set(keyOf(e), e.description));
+  // severity levels seen per event; only these events get a level picker
+  const levelsByKey = new Map((data.levels || []).map((e) => [keyOf(e), e.levels]));
+  // only these events suggest networks (ASNs) as tags; elsewhere an ASN would never match
+  // path events are tagged with perfSONAR path elements (netsites and ASNs), all other events with sites
+  const pathEventKeys = new Set((data.pathEvents || []).map(keyOf));
+  const ASN_RE = /^AS\d+$/;
 
-  // alerts.py splits subscription tags on spaces and treats '*' as "all";
-  // older entries may hold arrays or comma-separated strings.
-  function parseTags(tags) {
-    const raw = Array.isArray(tags) ? tags : [tags];
+  // alerts.py splits subscription tags and levels on spaces and treats '*' (or a
+  // missing value) as "all"; older entries may hold arrays or comma-separated strings.
+  function parseList(value) {
+    const raw = Array.isArray(value) ? value : [value];
     const out = [];
     raw.forEach((t) => {
       String(t === undefined || t === null ? '' : t).split(/[\s,]+/).forEach((v) => {
@@ -49,8 +57,8 @@
     return out;
   }
 
-  const serializeTags = (tags) => (tags.length ? tags.join(' ') : '*');
-  const clone = (items) => items.map((s) => ({ ...s, tags: [...s.tags] }));
+  const serializeList = (values) => (values.length ? values.join(' ') : '*');
+  const clone = (items) => items.map((s) => ({ ...s, tags: [...s.tags], levels: [...s.levels] }));
 
   // ---- state -------------------------------------------------------------
 
@@ -59,10 +67,12 @@
   data.subscriptions.forEach((s) => {
     if (seen.has(keyOf(s))) return;
     seen.add(keyOf(s));
-    subs.push({ ...s, tags: parseTags(s.tags) });
+    subs.push({
+      ...s, tags: parseList(s.tags), levels: parseList(s.levels), hadLevels: 'levels' in s,
+    });
   });
 
-  const snapshot = () => JSON.stringify(subs.map((s) => [keyOf(s), s.tags]).sort());
+  const snapshot = () => JSON.stringify(subs.map((s) => [keyOf(s), s.tags, s.levels]).sort());
   let saved = { subs: clone(subs), snapshot: snapshot() };
 
   let source = 'alarms';
@@ -71,7 +81,17 @@
 
   let allTags = [];
   let knownTags = new Map(); // lower case -> canonical
+  let pathTags = [];
+  let knownPathTags = new Map();
+  let tagLabels = {}; // network names of ASN tags, e.g. { AS513: 'CERN, CH' }
   let tagsState = 'loading';
+
+  // network alarms tag ASNs as 'AS<number>' and alerts.py matches exactly, so 'as513' becomes 'AS513'
+  function normalizeTag(value) {
+    const v = String(value).trim();
+    const asn = v.match(/^as(\d+)$/i);
+    return asn ? `AS${asn[1]}` : v;
+  }
   const tagFields = new Set();
 
   // ---- catalog tree ------------------------------------------------------
@@ -108,6 +128,7 @@
       children.hidden = !isOpen;
       twisty.setAttribute('aria-expanded', String(isOpen));
       if (isOpen) expanded.add(key); else expanded.delete(key);
+      updateExpandAll();
     };
     twisty.addEventListener('click', toggle);
     name.addEventListener('click', toggle);
@@ -134,6 +155,23 @@
     return label;
   }
 
+  // every category and subcategory of the shown source
+  function groupKeys() {
+    const keys = new Set();
+    sources[source].forEach((e) => {
+      keys.add(JSON.stringify([source, e.category]));
+      keys.add(JSON.stringify([source, e.category, e.subcategory]));
+    });
+    return [...keys];
+  }
+
+  function updateExpandAll() {
+    const keys = groupKeys();
+    const allOpen = keys.length > 0 && keys.every((k) => expanded.has(k));
+    expandAll.textContent = allOpen ? 'Collapse all' : 'Expand all';
+    expandAll.hidden = keys.length === 0;
+  }
+
   function renderTree() {
     const q = search.value.trim().toLowerCase();
     const events = sources[source]
@@ -146,6 +184,7 @@
     groupBoxes = [];
     if (events.length === 0) {
       tree.append(el('p', 'tree-empty', q ? `No events match “${search.value.trim()}”.` : 'Nothing registered yet.'));
+      updateExpandAll();
       return;
     }
 
@@ -158,11 +197,12 @@
     });
 
     categories.forEach((subcategories, category) => {
-      const catKey = JSON.stringify([category]);
+      // keyed per tab: alarms and heartbeats can share category names
+      const catKey = JSON.stringify([source, category]);
       const catEvents = [].concat(...subcategories.values());
       const cat = groupNode('tree-cat', category, catKey, catEvents, Boolean(q) || expanded.has(catKey));
       subcategories.forEach((subEvents, subcategory) => {
-        const subKey = JSON.stringify([category, subcategory]);
+        const subKey = JSON.stringify([source, category, subcategory]);
         const sub = groupNode('tree-sub', subcategory, subKey, subEvents, Boolean(q) || expanded.has(subKey));
         subEvents.forEach((e) => sub.children.append(leafNode(e)));
         cat.children.append(sub.root);
@@ -170,6 +210,7 @@
       tree.append(cat.root);
     });
     syncTree();
+    updateExpandAll();
   }
 
   function syncTree() {
@@ -193,7 +234,7 @@
       events.forEach((e) => {
         if (have.has(keyOf(e))) return;
         subs.push({
-          category: e.category, subcategory: e.subcategory, event: e.event, tags: [],
+          category: e.category, subcategory: e.subcategory, event: e.event, tags: [], levels: [],
         });
         flashKeys.push(keyOf(e));
       });
@@ -209,6 +250,9 @@
   let fieldId = 0;
 
   function tagField(sub) {
+    const pathOk = pathEventKeys.has(keyOf(sub));
+    const suggestions = () => (pathOk ? pathTags : allTags);
+    const known = () => (pathOk ? knownPathTags : knownTags);
     const field = el('div', 'tag-field');
     const input = document.createElement('input');
     const listbox = el('ul', 'suggestions');
@@ -231,9 +275,10 @@
     function renderChips() {
       field.querySelectorAll('.chip').forEach((c) => c.remove());
       sub.tags.forEach((tag) => {
-        const custom = tagsState === 'ready' && !knownTags.has(tag.toLowerCase());
+        const custom = tagsState === 'ready' && !known().has(tag.toLowerCase());
         const chip = el('span', custom ? 'chip chip-custom' : 'chip', tag);
         if (custom) chip.title = 'Not found in any alarm so far';
+        else if (tagLabels[tag]) chip.title = tagLabels[tag];
         const x = el('button');
         x.type = 'button';
         x.innerHTML = ICON_X;
@@ -246,13 +291,14 @@
         chip.append(x);
         field.insertBefore(chip, input);
       });
-      input.placeholder = sub.tags.length ? 'Add site…' : 'All sites · type to narrow down';
+      if (pathOk) input.placeholder = sub.tags.length ? 'Add site or ASN…' : 'All sites · type a site or ASN';
+      else input.placeholder = sub.tags.length ? 'Add site…' : 'All sites · type to narrow down';
     }
 
     function addTag(raw) {
-      const value = String(raw).trim();
+      const value = normalizeTag(raw);
       if (!value || value === '*') return;
-      const tag = knownTags.get(value.toLowerCase()) || value;
+      const tag = known().get(value.toLowerCase()) || value;
       if (sub.tags.includes(tag)) return;
       sub.tags.push(tag);
       renderChips();
@@ -301,15 +347,20 @@
         const chosen = new Set(sub.tags);
         const prefix = [];
         const inner = [];
-        allTags.forEach((t) => {
-          if (chosen.has(t)) return;
+        const byName = []; // ASNs whose network name matches, e.g. 'cern' -> AS513
+        suggestions().forEach((t) => {
+          if (chosen.has(t) || (!pathOk && ASN_RE.test(t))) return;
           const l = t.toLowerCase();
           if (!q || l.startsWith(q)) prefix.push(t);
           else if (l.includes(q)) inner.push(t);
+          else if (pathOk && tagLabels[t] && tagLabels[t].toLowerCase().includes(q)) byName.push(t);
         });
-        const matches = prefix.concat(inner);
+        const matches = prefix.concat(inner, byName);
         options = matches.slice(0, MAX_SUGGESTIONS).map((value) => ({ value }));
-        if (q && !knownTags.has(q) && !chosen.has(typed)) options.push({ value: typed, custom: true });
+        const typedTag = normalizeTag(typed);
+        // a network name typed as a tag would never match, so don't offer it when names matched
+        const onlyNames = byName.length > 0 && prefix.length === 0 && inner.length === 0;
+        if (q && !onlyNames && !known().has(typedTag.toLowerCase()) && !chosen.has(typedTag)) options.push({ value: typedTag, custom: true });
 
         options.forEach((opt, i) => {
           const li = el('li', 'suggestion');
@@ -326,13 +377,14 @@
               label.textContent = opt.value;
             }
             li.append(label);
+            if (tagLabels[opt.value]) li.append(el('span', 'suggestion-hint', tagLabels[opt.value]));
           }
           li.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the input
           li.addEventListener('click', () => choose(i));
           listbox.append(li);
         });
         if (matches.length > MAX_SUGGESTIONS) info(`${matches.length - MAX_SUGGESTIONS} more · keep typing to narrow down`);
-        if (allTags.length === 0 && !q) info('No sites found yet. Type a tag and press Enter.');
+        if (suggestions().length === 0 && !q) info('No sites found yet. Type a tag and press Enter.');
       } else if (tagsState === 'loading') {
         info('Loading sites…');
       } else {
@@ -392,6 +444,42 @@
     return field;
   }
 
+  // ---- severity levels -------------------------------------------------------
+
+  // toggle pills for the levels `available` for this event; none chosen means all
+  function levelPicker(sub, available) {
+    const group = el('div', 'levels');
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', `Levels for ${sub.event}`);
+    group.append(el('span', 'levels-label', 'Levels'));
+
+    const selected = () => (sub.levels.length ? available.filter((v) => sub.levels.includes(v)) : [...available]);
+    const pills = available.map((value) => {
+      const pill = el('button', 'level-pill', value);
+      pill.type = 'button';
+      pill.addEventListener('click', () => {
+        const current = selected();
+        const next = current.includes(value)
+          ? current.filter((v) => v !== value)
+          : available.filter((v) => v === value || current.includes(v));
+        // every level is stored as "all" ('*'); no level at all would silently mute the subscription
+        sub.levels = next.length === 0 || next.length === available.length ? [] : next;
+        render();
+        updateSavebar();
+      });
+      group.append(pill);
+      return pill;
+    });
+
+    function render() {
+      const current = selected();
+      pills.forEach((pill, i) => pill.setAttribute('aria-pressed', String(current.includes(available[i]))));
+    }
+
+    render();
+    return group;
+  }
+
   // ---- subscription list ---------------------------------------------------
 
   function subRow(sub) {
@@ -405,7 +493,11 @@
     info.append(name);
 
     let body;
-    if (alarmKeys.has(key)) {
+    // a choice needs at least two levels
+    if (alarmKeys.has(key) && levelsByKey.has(key) && levelsByKey.get(key).length > 1) {
+      body = el('div', 'sub-body');
+      body.append(tagField(sub), levelPicker(sub, levelsByKey.get(key)));
+    } else if (alarmKeys.has(key)) {
       body = tagField(sub);
     } else if (heartbeatKeys.has(key)) {
       info.append(el('span', 'sub-badge', 'Heartbeat'));
@@ -482,7 +574,14 @@
     if (!isDirty() || saveBtn.disabled) return;
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving…';
-    const body = subs.map(({ tags, ...rest }) => ({ ...rest, tags: serializeTags(tags) }));
+    const body = subs.map(({
+      tags, levels, hadLevels, ...rest
+    }) => {
+      const out = { ...rest, tags: serializeList(tags) };
+      // only events that report a severity get `levels`; other subscriptions are saved as before
+      if (hadLevels || levelsByKey.has(keyOf(rest))) out.levels = serializeList(levels);
+      return out;
+    });
     try {
       const res = await fetch(`/user/subscriptions/${encodeURIComponent(data.userId)}`, {
         method: 'POST',
@@ -524,6 +623,224 @@
     }
   });
 
+  // ---- ongoing issues: acknowledging mutes a site for one event, for this user ---
+
+  const DAY_MS = 24 * 3600 * 1000;
+  const ACK_DAYS = 7; // one click mutes for a week; the menu offers shorter mutes
+  const ISSUES_SHOWN = 6; // events listed before "Show all"
+  const GROUP_OPEN_MAX = 3; // events with this many sites or fewer start expanded
+  const issuesList = document.getElementById('issues-list');
+  const issuesCount = document.getElementById('issues-count');
+  const ackKey = (o) => JSON.stringify([o.category, o.subcategory, o.event, o.tag]);
+  let acks = data.acknowledgements || [];
+  let issueOrder = null;
+  let showAllIssues = false;
+  let expandedGroups = null;
+
+  function timeAgo(ms) {
+    const minutes = Math.max(0, Math.round((Date.now() - ms) / 60000));
+    if (minutes < 60) return minutes <= 1 ? 'just now' : `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+  }
+
+  const formatUntil = (ms) => new Date(ms).toLocaleString(undefined, {
+    weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+  });
+
+  // optimistic: show the change at once, roll back if the server refuses it
+  async function saveAcks(next, message, focusKey) {
+    const previous = acks;
+    acks = next;
+    renderIssues(focusKey);
+    try {
+      const res = await fetch(`/user/acknowledgements/${encodeURIComponent(data.userId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+      acks = await res.json();
+      renderIssues(focusKey);
+      toast(message);
+    } catch (err) {
+      console.error('saving acknowledgements failed:', err);
+      acks = previous;
+      renderIssues(focusKey);
+      toast('Couldn’t save that. Please try again.', 'error');
+    }
+  }
+
+  function acknowledge(issue, days) {
+    const now = Date.now();
+    const until = now + days * DAY_MS;
+    const ack = {
+      category: issue.category, subcategory: issue.subcategory, event: issue.event, tag: issue.tag, created_at: now, until,
+    };
+    const next = acks.filter((a) => ackKey(a) !== ackKey(issue)).concat(ack);
+    saveAcks(next, `Muted ${issue.tag} · ${issue.event} until ${formatUntil(until)}`, ackKey(issue));
+  }
+
+  function unmute(issue) {
+    saveAcks(acks.filter((a) => ackKey(a) !== ackKey(issue)), `Unmuted ${issue.tag} · ${issue.event}`, ackKey(issue));
+  }
+
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+  // inside an event group the event name is in the group header, so a row is just the site
+  function issueRow(issue, inGroup) {
+    const row = el('div', issue.ack ? 'issue-row is-muted' : 'issue-row');
+    row.dataset.key = ackKey(issue);
+
+    const main = el('div', 'issue-main');
+    const activity = issue.count
+      ? `${plural(issue.count, 'alarm')} · latest ${timeAgo(issue.last)}`
+      : `no alarms in the last ${data.ongoingHours} h`;
+    const title = el('div', 'issue-title');
+    const chip = el('span', 'chip chip-plain', issue.tag);
+    title.append(chip);
+    if (tagLabels[issue.tag]) title.append(el('span', 'issue-label', tagLabels[issue.tag]));
+    if (!inGroup) title.append(el('span', 'issue-event', issue.event));
+    main.append(title, el('span', 'issue-meta', inGroup ? activity : `${issue.category} › ${issue.subcategory} · ${activity}`));
+
+    const actions = el('div', 'issue-actions');
+    if (issue.ack) {
+      const unmuteBtn = el('button', 'btn btn-ghost btn-sm issue-primary', 'Unmute');
+      unmuteBtn.type = 'button';
+      unmuteBtn.setAttribute('aria-label', `Unmute ${issue.tag} for ${issue.event}`);
+      unmuteBtn.addEventListener('click', () => unmute(issue));
+      actions.append(el('span', 'issue-muted', `Muted until ${formatUntil(issue.ack.until)}`), unmuteBtn);
+    } else {
+      const ackBtn = el('button', 'btn btn-secondary btn-sm issue-primary', 'Acknowledge');
+      ackBtn.type = 'button';
+      ackBtn.title = `Stop emails about ${issue.tag} for this event for ${ACK_DAYS} days`;
+      ackBtn.setAttribute('aria-label', `Acknowledge ${issue.tag} for ${issue.event}: mute for ${ACK_DAYS} days`);
+      ackBtn.addEventListener('click', () => acknowledge(issue, ACK_DAYS));
+
+      const more = el('details', 'menu issue-more');
+      const summary = el('summary', 'icon-btn');
+      summary.innerHTML = ICON_CHEVRON_DOWN;
+      summary.setAttribute('aria-label', `Shorter mute for ${issue.tag}`);
+      const panel = el('div', 'menu-panel');
+      panel.setAttribute('role', 'menu');
+      [1, 3].forEach((days) => {
+        const item = el('button', 'menu-item', `Mute for ${days} day${days === 1 ? '' : 's'}`);
+        item.type = 'button';
+        item.setAttribute('role', 'menuitem');
+        item.addEventListener('click', () => {
+          more.removeAttribute('open');
+          acknowledge(issue, days);
+        });
+        panel.append(item);
+      });
+      more.append(summary, panel);
+      actions.append(ackBtn, more);
+    }
+
+    row.append(main, actions);
+    return row;
+  }
+
+  // one event with several sites: a header with totals that expands to the per-site rows
+  function issueGroup(group) {
+    const box = el('div', 'issue-group');
+    const open = expandedGroups.has(group.key);
+    const sites = group.rows.length;
+    const alarmCount = group.rows.reduce((n, r) => n + r.count, 0);
+    const muted = group.rows.filter((r) => r.ack).length;
+    const latest = Math.max(...group.rows.map((r) => r.last));
+
+    const head = el('button', 'issue-group-head');
+    head.type = 'button';
+    head.setAttribute('aria-expanded', String(open));
+    head.innerHTML = ICON_CHEVRON;
+    const main = el('span', 'issue-main');
+    const facts = [`${group.category} › ${group.subcategory}`, plural(sites, 'tag'), plural(alarmCount, 'alarm')];
+    if (latest) facts.push(`latest ${timeAgo(latest)}`);
+    if (muted) facts.push(`${muted} muted`);
+    main.append(el('span', 'issue-event', group.event), el('span', 'issue-meta', facts.join(' · ')));
+    head.append(main);
+    head.addEventListener('click', () => {
+      if (expandedGroups.has(group.key)) expandedGroups.delete(group.key);
+      else expandedGroups.add(group.key);
+      renderIssues();
+    });
+
+    box.append(head);
+    if (open) {
+      const body = el('div', 'issue-group-body');
+      group.rows.forEach((r) => body.append(issueRow(r, true)));
+      box.append(body);
+    }
+    return box;
+  }
+
+  function renderIssues(focusKey) {
+    const now = Date.now();
+    acks = acks.filter((a) => a.until > now);
+    const ackByKey = new Map(acks.map((a) => [ackKey(a), a]));
+    const rows = (data.ongoing || []).map((i) => ({ ...i, ack: ackByKey.get(ackKey(i)) }));
+    const listed = new Set(rows.map(ackKey));
+    // mutes without recent alarms still get a row, so they can be unmuted
+    acks.forEach((a) => {
+      if (!listed.has(ackKey(a))) rows.push({ ...a, count: 0, last: 0, ack: a });
+    });
+
+    if (!issueOrder) {
+      // issues still sending emails first, newest first; muted ones after
+      rows.sort((a, b) => Number(Boolean(a.ack)) - Number(Boolean(b.ack)) || b.last - a.last);
+      issueOrder = rows.map(ackKey);
+    } else {
+      // keep rows where they are after (un)muting, so they don't jump away
+      const pos = (r) => (issueOrder.includes(ackKey(r)) ? issueOrder.indexOf(ackKey(r)) : issueOrder.length);
+      rows.sort((a, b) => pos(a) - pos(b));
+    }
+
+    // one entry per event, in the order of its first row
+    const groups = new Map();
+    rows.forEach((r) => {
+      const key = JSON.stringify([r.category, r.subcategory, r.event]);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key, category: r.category, subcategory: r.subcategory, event: r.event, rows: [],
+        });
+      }
+      groups.get(key).rows.push(r);
+    });
+    const entries = [...groups.values()];
+    if (!expandedGroups) expandedGroups = new Set(entries.filter((g) => g.rows.length <= GROUP_OPEN_MAX).map((g) => g.key));
+
+    // badge: events that still send emails (not every site of them muted)
+    const open = entries.filter((g) => g.rows.some((r) => !r.ack)).length;
+    issuesCount.textContent = open;
+    issuesCount.hidden = open === 0;
+    issuesList.textContent = '';
+    if (data.ongoing === null) {
+      issuesList.append(el('p', 'issues-empty', 'Couldn’t load recent alarms right now.'));
+    } else if (rows.length === 0) {
+      issuesList.append(el('p', 'issues-empty', `No alarms for your subscriptions in the last ${data.ongoingHours} hours.`));
+    }
+
+    (showAllIssues ? entries : entries.slice(0, ISSUES_SHOWN))
+      .forEach((g) => issuesList.append(g.rows.length === 1 ? issueRow(g.rows[0], false) : issueGroup(g)));
+    if (entries.length > ISSUES_SHOWN) {
+      const footer = el('div', 'issues-footer');
+      const toggle = el('button', 'btn btn-ghost btn-sm', showAllIssues ? 'Show fewer' : `Show all ${entries.length} events`);
+      toggle.type = 'button';
+      toggle.addEventListener('click', () => {
+        showAllIssues = !showAllIssues;
+        renderIssues();
+      });
+      footer.append(toggle);
+      issuesList.append(footer);
+    }
+
+    if (focusKey) {
+      const row = [...issuesList.querySelectorAll('.issue-row')].find((r) => r.dataset.key === focusKey);
+      if (row) row.querySelector('.issue-primary').focus();
+    }
+  }
+
   // ---- catalog controls ----------------------------------------------------
 
   document.querySelectorAll('.seg').forEach((btn) => {
@@ -537,15 +854,26 @@
     c.textContent = sources[c.dataset.count].length;
   });
   search.addEventListener('input', renderTree);
+  expandAll.addEventListener('click', () => {
+    const keys = groupKeys();
+    if (keys.every((k) => expanded.has(k))) keys.forEach((k) => expanded.delete(k));
+    else keys.forEach((k) => expanded.add(k));
+    renderTree();
+  });
 
   // ---- tag suggestions -----------------------------------------------------
 
-  fetch('/alarm/tags')
+  fetch('/alarm/tags?labels=1')
     .then((res) => (res.ok ? res.json() : Promise.reject(new Error(res.status))))
-    .then((tags) => {
+    .then(({ tags, pathTags: path, labels }) => {
       allTags = tags;
       knownTags = new Map(tags.map((t) => [t.toLowerCase(), t]));
+      pathTags = path || [];
+      knownPathTags = new Map(pathTags.map((t) => [t.toLowerCase(), t]));
+      tagLabels = labels || {};
       tagsState = 'ready';
+      // ongoing issues may list ASNs that now have a network name
+      if (Object.keys(tagLabels).length) renderIssues();
     })
     .catch((err) => {
       console.error('loading tags failed:', err);
@@ -555,4 +883,5 @@
 
   renderTree();
   renderSubs();
+  renderIssues();
 }());

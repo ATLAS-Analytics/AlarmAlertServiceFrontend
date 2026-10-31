@@ -3,6 +3,9 @@ const express = require('express');
 const bodyParser = require('body-parser');
 
 const esUsersIndex = 'aaas_users';
+// an acknowledged (muted) site issue stays muted for a week unless another `until` is given
+const ACK_DEFAULT_MS = 7 * 24 * 3600 * 1000;
+const ACK_FIELDS = ['category', 'subcategory', 'event', 'tag'];
 let config;
 let es;
 
@@ -49,6 +52,7 @@ async function loadUser(userId = null) {
           obj.preferences[key] = value.default_value;
         }
       });
+      obj.acknowledgements = obj.acknowledgements || [];
       console.debug(obj.user);
       return obj;
     }
@@ -219,6 +223,58 @@ router.post('/subscriptions/:userId', jsonParser, async (req, res) => {
     res.status(200).send('OK');
   } catch (err) {
     console.error('cant update user subscriptions:\n', err);
+    res.status(500).send(`something went wrong:\n${err}`);
+  }
+});
+
+// replaces the user's muted site issues; responds with the stored list
+router.post('/acknowledgements/:userId', jsonParser, async (req, res) => {
+  const {
+    userId
+  } = req.params;
+  const b = req.body;
+  console.log(`Updating acknowledgements for user ${userId} with body:\n`, b);
+  // an empty array is valid: it unmutes everything
+  if (!Array.isArray(b)) {
+    res.status(400).send('expected a JSON array of acknowledgements.\n');
+    return;
+  }
+  const invalid = b.some((a) => !a || ACK_FIELDS.some((k) => typeof a[k] !== 'string' || a[k] === '')
+    || (a.until !== undefined && typeof a.until !== 'number'));
+  if (invalid) {
+    res.status(400).send(`each acknowledgement needs ${ACK_FIELDS.join(', ')}; until (ms) is optional.\n`);
+    return;
+  }
+
+  const now = Date.now();
+  const acknowledgements = b
+    .map((a) => {
+      const createdAt = typeof a.created_at === 'number' ? a.created_at : now;
+      return {
+        category: a.category,
+        subcategory: a.subcategory,
+        event: a.event,
+        tag: a.tag,
+        created_at: createdAt,
+        until: a.until === undefined ? createdAt + ACK_DEFAULT_MS : a.until,
+      };
+    })
+    .filter((a) => a.until > now);
+  try {
+    await es.update({
+      index: esUsersIndex,
+      id: userId,
+      refresh: true,
+      body: {
+        doc: {
+          acknowledgements,
+        },
+      },
+    });
+    console.log('User acknowledgements updated.');
+    res.status(200).json(acknowledgements);
+  } catch (err) {
+    console.error('cant update user acknowledgements:\n', err);
     res.status(500).send(`something went wrong:\n${err}`);
   }
 });

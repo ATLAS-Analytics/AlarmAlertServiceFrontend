@@ -28,6 +28,7 @@ Events whose alarms report a severity also let you pick the **levels** you want;
 
 When a site has a known, ongoing problem, **Acknowledge** it in the *Ongoing issues* panel to stop emails about that site for that event.
 The mute lasts a week (or 1 or 3 days if you choose), applies only to you, and ends on its own; you can unmute at any time.
+For events whose alarms report a severity you can also mute only one level, e.g. *Mute only minor*: alarms of the other levels are still emailed.
 
 Alerts are bundled into a single email, sent every few hours according to the mail interval in your [preferences](/profile).
 Turn on vacation mode there to pause them.
@@ -259,7 +260,8 @@ The body is the complete list of the user’s subscriptions; an empty array unsu
     "subcategory": "",
     "event": "",
     "tag": "MWT2",
-    "until": 1762790400000
+    "until": 1762790400000,
+    "levels": ["minor"]
   },
   ...
 ]
@@ -268,6 +270,7 @@ The body is the complete list of the user’s subscriptions; an empty array unsu
 The body is the complete list of the user’s muted site issues; an empty array unmutes everything.
 While muted, alarms of that event carrying that tag are not emailed to the user.
 `until` (epoch milliseconds) is optional and defaults to one week after `created_at` (now).
+`levels` is optional: when given, only alarms of those severity levels are muted.
 Expired entries are dropped. Responds with the stored list.
 
 ### Heartbeats

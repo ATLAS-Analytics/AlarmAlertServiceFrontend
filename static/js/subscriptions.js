@@ -671,14 +671,17 @@
     }
   }
 
-  function acknowledge(issue, days) {
+  // `levels` (optional) mutes only alarms of those severity levels; others are still emailed
+  function acknowledge(issue, days, levels) {
     const now = Date.now();
     const until = now + days * DAY_MS;
     const ack = {
       category: issue.category, subcategory: issue.subcategory, event: issue.event, tag: issue.tag, created_at: now, until,
     };
+    if (levels) ack.levels = levels;
     const next = acks.filter((a) => ackKey(a) !== ackKey(issue)).concat(ack);
-    saveAcks(next, `Muted ${issue.tag} · ${issue.event} until ${formatUntil(until)}`, ackKey(issue));
+    const what = levels ? `${levels.join(', ')} alarms of ${issue.tag}` : issue.tag;
+    saveAcks(next, `Muted ${what} · ${issue.event} until ${formatUntil(until)}`, ackKey(issue));
   }
 
   function unmute(issue) {
@@ -687,14 +690,31 @@
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+  // alarm counts per severity level, as found in the alarms: "4 minor, 1 major" / "3 at level 2"
+  function levelCounts(levels) {
+    return Object.entries(levels || {})
+      .sort((a, b) => b[1] - a[1])
+      .map(([level, n]) => (Number.isNaN(Number(level)) ? `${n} ${level}` : `${n} at level ${level}`))
+      .join(', ');
+  }
+
+  function sumLevels(rows) {
+    const total = {};
+    rows.forEach((r) => Object.entries(r.levels || {}).forEach(([level, n]) => {
+      total[level] = (total[level] || 0) + n;
+    }));
+    return total;
+  }
+
   // inside an event group the event name is in the group header, so a row is just the site
   function issueRow(issue, inGroup) {
     const row = el('div', issue.ack ? 'issue-row is-muted' : 'issue-row');
     row.dataset.key = ackKey(issue);
 
     const main = el('div', 'issue-main');
+    const counts = levelCounts(issue.levels);
     const activity = issue.count
-      ? `${plural(issue.count, 'alarm')} · latest ${timeAgo(issue.last)}`
+      ? `${plural(issue.count, 'alarm')}${counts ? ` (${counts})` : ''} · latest ${timeAgo(issue.last)}`
       : `no alarms in the last ${data.ongoingHours} h`;
     const title = el('div', 'issue-title');
     const chip = el('span', 'chip chip-plain', issue.tag);
@@ -709,7 +729,10 @@
       unmuteBtn.type = 'button';
       unmuteBtn.setAttribute('aria-label', `Unmute ${issue.tag} for ${issue.event}`);
       unmuteBtn.addEventListener('click', () => unmute(issue));
-      actions.append(el('span', 'issue-muted', `Muted until ${formatUntil(issue.ack.until)}`), unmuteBtn);
+      const only = issue.ack.levels ? ` · ${issue.ack.levels.join(', ')} only` : '';
+      const mutedText = el('span', 'issue-muted', `Muted until ${formatUntil(issue.ack.until)}${only}`);
+      if (only) mutedText.title = 'Alarms of other severity levels are still emailed';
+      actions.append(mutedText, unmuteBtn);
     } else {
       const ackBtn = el('button', 'btn btn-secondary btn-sm issue-primary', 'Acknowledge');
       ackBtn.type = 'button';
@@ -723,16 +746,23 @@
       summary.setAttribute('aria-label', `Shorter mute for ${issue.tag}`);
       const panel = el('div', 'menu-panel');
       panel.setAttribute('role', 'menu');
-      [1, 3].forEach((days) => {
-        const item = el('button', 'menu-item', `Mute for ${days} day${days === 1 ? '' : 's'}`);
+      const menuItem = (text, onClick) => {
+        const item = el('button', 'menu-item', text);
         item.type = 'button';
         item.setAttribute('role', 'menuitem');
         item.addEventListener('click', () => {
           more.removeAttribute('open');
-          acknowledge(issue, days);
+          onClick();
         });
         panel.append(item);
-      });
+      };
+      [1, 3].forEach((days) => menuItem(`Mute for ${days} day${days === 1 ? '' : 's'}`, () => acknowledge(issue, days)));
+      // the event's severity levels as found in its alarms: mute one, still get the others
+      const eventLevels = levelsByKey.get(keyOf(issue)) || [];
+      if (eventLevels.length > 1) {
+        panel.append(el('div', 'menu-sep'));
+        eventLevels.forEach((level) => menuItem(`Mute only ${level} (${ACK_DAYS} days)`, () => acknowledge(issue, ACK_DAYS, [level])));
+      }
       more.append(summary, panel);
       actions.append(ackBtn, more);
     }
@@ -755,7 +785,8 @@
     head.setAttribute('aria-expanded', String(open));
     head.innerHTML = ICON_CHEVRON;
     const main = el('span', 'issue-main');
-    const facts = [`${group.category} › ${group.subcategory}`, plural(sites, 'tag'), plural(alarmCount, 'alarm')];
+    const counts = levelCounts(sumLevels(group.rows));
+    const facts = [`${group.category} › ${group.subcategory}`, plural(sites, 'tag'), `${plural(alarmCount, 'alarm')}${counts ? ` (${counts})` : ''}`];
     if (latest) facts.push(`latest ${timeAgo(latest)}`);
     if (muted) facts.push(`${muted} muted`);
     main.append(el('span', 'issue-event', group.event), el('span', 'issue-meta', facts.join(' · ')));

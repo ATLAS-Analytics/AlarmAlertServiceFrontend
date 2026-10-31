@@ -239,10 +239,13 @@ router.post('/acknowledgements/:userId', jsonParser, async (req, res) => {
     res.status(400).send('expected a JSON array of acknowledgements.\n');
     return;
   }
+  // `levels` (optional) limits the mute to those severity levels; other levels are still emailed
+  const badLevels = (levels) => levels !== undefined
+    && (!Array.isArray(levels) || levels.some((l) => typeof l !== 'string' || l === '' || /\s/.test(l)));
   const invalid = b.some((a) => !a || ACK_FIELDS.some((k) => typeof a[k] !== 'string' || a[k] === '')
-    || (a.until !== undefined && typeof a.until !== 'number'));
+    || (a.until !== undefined && typeof a.until !== 'number') || badLevels(a.levels));
   if (invalid) {
-    res.status(400).send(`each acknowledgement needs ${ACK_FIELDS.join(', ')}; until (ms) is optional.\n`);
+    res.status(400).send(`each acknowledgement needs ${ACK_FIELDS.join(', ')}; until (ms) and levels (array) are optional.\n`);
     return;
   }
 
@@ -250,7 +253,7 @@ router.post('/acknowledgements/:userId', jsonParser, async (req, res) => {
   const acknowledgements = b
     .map((a) => {
       const createdAt = typeof a.created_at === 'number' ? a.created_at : now;
-      return {
+      const ack = {
         category: a.category,
         subcategory: a.subcategory,
         event: a.event,
@@ -258,6 +261,8 @@ router.post('/acknowledgements/:userId', jsonParser, async (req, res) => {
         created_at: createdAt,
         until: a.until === undefined ? createdAt + ACK_DEFAULT_MS : a.until,
       };
+      if (a.levels && a.levels.length) ack.levels = [...new Set(a.levels)];
+      return ack;
     })
     .filter((a) => a.until > now);
   try {

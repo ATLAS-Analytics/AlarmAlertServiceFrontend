@@ -275,7 +275,8 @@ function levelMatches(sub, alarm) {
 }
 
 // Alarms of the last `hours` that the user's email would contain, one entry per
-// (event, site tag): [{ category, subcategory, event, tag, count, last }], newest first.
+// (event, site tag): [{ category, subcategory, event, tag, count, last, levels }], newest first;
+// `levels` counts the alarms per severity level, e.g. { minor: 4, major: 1 }.
 // Tag and level matching mirror alerts.py; alarms without tags (e.g. heartbeats) can't
 // be muted per site and are left out. Returns null if the alarms can't be read.
 async function loadOngoingIssues(subscriptions, hours) {
@@ -309,10 +310,11 @@ async function loadOngoingIssues(subscriptions, hours) {
         if (!tag || (wanted && !wanted.includes(tag))) return;
         const key = JSON.stringify([al.category, al.subcategory, al.event, tag]);
         const issue = issues.get(key) || {
-          category: al.category, subcategory: al.subcategory, event: al.event, tag, count: 0, last: 0,
+          category: al.category, subcategory: al.subcategory, event: al.event, tag, count: 0, last: 0, levels: {},
         };
         issue.count += 1;
         issue.last = Math.max(issue.last, al.created_at);
+        if (al.level !== undefined && al.level !== null) issue.levels[al.level] = (issue.levels[al.level] || 0) + 1;
         issues.set(key, issue);
       });
     });

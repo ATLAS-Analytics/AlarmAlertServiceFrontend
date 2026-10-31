@@ -73,11 +73,17 @@ const sites = ['AGLT2', 'MWT2', 'BNL-ATLAS', 'SWT2_CPB', 'NET2', 'CERN-PROD', 'U
   'TOKYO-LCG2', 'praguelcg2', 'DESY-HH', 'LRZ-LMU', 'IFIC-LCG2', 'GRIF', 'BEIJING-LCG2', 'Australia-ATLAS', 'CA-SFU-T2', 'WT2',
   'MPPMU', 'IL-TAU-HEP', 'RO-07-NIPNE', 'UNI-FREIBURG', 'wuppertalprod', 'CSCS-LCG2', 'UAM-LCG2', 'INFN-NAPOLI-ATLAS'];
 const netsites = ['MWT2-UC', 'MWT2-IU', 'MWT2-UIUC', 'AGLT2-UM', 'AGLT2-MSU', 'BNL-ATLAS-LHCONE', 'CERN-PROD-LHCOPN', 'UC-AF'];
+const psNetsites = ['BNL-ATLAS-LHCOPN', 'CERN-PROD-LHCONE', 'FZK-LCG2-LHCOPN', 'IN2P3-CC-LHCONE', 'INFN-T1-LHCOPN', 'NDGF-T1-LHCONE',
+  'RAL-LCG2-LHCOPN', 'SARA-MATRIX-LHCOPN', 'TRIUMF-LCG2-LHCOPN', 'pic-LHCOPN', 'KIT-LHCONE', 'JINR-T1-LHCOPN', 'IHEP-LHCONE',
+  'NCBJ-CIS', 'UKI-SCOTGRID-GLASGOW', 'UKI-NORTHGRID-LANCS-HEP', 'IFCA-LCG2', 'CYFRONET-LCG2', 'GoeGrid', 'INFN-LNF', 'INFN-ROMA1'];
 const aggValues = {
   'tags.keyword': [...sites, ...netsites, 'University of Nowhere', '*'],
   'source.src_site.keyword': sites.slice(0, 20),
   'source.dest_netsite': netsites,
   'source.site': ['MWT2', 'AGLT2', 'SiteOnlyInSource'],
+  src_netsite: psNetsites,
+  dest_netsite: psNetsites.slice(5),
+  src_site: sites.slice(10),
 };
 const users = {
   'user-1': {
@@ -111,8 +117,10 @@ class FakeES {
     }
     if (p.index === 'aaas_categories') return hits(categories);
     if (p.index === 'aaas_heartbeats_topology') return hits(hbTopology);
-    if (p.index === 'aaas_alarms' && p.aggs) {
+    if ((p.index === 'aaas_alarms' || p.index === 'ps_trace*') && p.aggs) {
       await delay(400);
+      global.FAKE.lastQuery = global.FAKE.lastQuery || {};
+      global.FAKE.lastQuery[p.index] = p.query;
       const aggregations = {};
       Object.entries(p.aggs).forEach(([name, a]) => {
         aggregations[name] = { buckets: (aggValues[a.terms.field] || []).map((key) => ({ key, doc_count: 1 })) };
@@ -123,9 +131,17 @@ class FakeES {
     return hits([]);
   }
 
-  async fieldCaps() {
+  async fieldCaps(p) {
     const kw = { keyword: { type: 'keyword', aggregatable: true } };
     const text = { text: { type: 'text', aggregatable: false } };
+    if (p.index === 'ps_trace*') {
+      return {
+        indices: ['ps_trace'],
+        fields: {
+          src_netsite: kw, dest_netsite: kw, src_site: kw, dest_site: text, timestamp: { date: { type: 'date', aggregatable: true } },
+        },
+      };
+    }
     return {
       indices: ['aaas_alarms'],
       fields: {

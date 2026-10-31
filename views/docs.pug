@@ -153,7 +153,7 @@ block content
           p Returns all currently registered alarm categories.
 
         +endpoint('api-alarm-tags', 'GET', '/alarm/tags', 'List tags')
-          p Returns every tag and site name found in stored alarms. Used for suggestions when subscribing.
+          p Returns every tag and site name found in stored alarms, plus the sites and netsites seen in perfSONAR traces (ps_trace) over the last 30 days. Used for suggestions when subscribing.
 
         +endpoint('api-alarm-register', 'POST', '/alarm/category', 'Register an alarm')
           pre: code.

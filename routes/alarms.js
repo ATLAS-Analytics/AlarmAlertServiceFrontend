@@ -10,9 +10,14 @@ let es;
 const categories = [];
 
 // tag suggestions for the subscriptions page: every value of alarm `tags`
-// and of `source.*site` / `source.*netsite` fields, refreshed hourly.
+// and of the site / netsite fields in alarms' `source` and in recent perfSONAR
+// traces (ps_trace), refreshed hourly.
 const TAGS_TTL = 3600 * 1000;
-const SITE_FIELD = /sites?(_(src|dest))?$/i;
+const SITE_FIELD = /(^|[._])(net)?sites?(_(src|dest))?$/i;
+const TAG_SOURCES = [
+  { index: 'aaas_alarms', fields: ['tags', 'tags.*', 'source.*'], isTagField: (f) => f === 'tags' || (f.startsWith('source.') && SITE_FIELD.test(f)) },
+  { index: 'ps_trace*', fields: ['*site*', 'timestamp', '@timestamp'], isTagField: (f) => SITE_FIELD.test(f), recent: '30d' },
+];
 let tagsCache = { loadedAt: 0, tags: [] };
 
 const router = express.Router();
@@ -61,45 +66,60 @@ async function loadAlarmTopology() {
   }
 }
 
+// distinct values of every aggregatable field in `index` that `isTagField` accepts
+async function collectTerms({
+  index, fields, isTagField, recent,
+}) {
+  // only keyword fields can be aggregated; with dynamic mappings that is the .keyword subfield
+  const caps = await es.fieldCaps({ index, fields, ignore_unavailable: true });
+  const tagFields = [];
+  let dateField;
+  Object.entries(caps.fields).forEach(([name, types]) => {
+    if (types.date !== undefined) dateField = dateField || name;
+    const base = name.replace(/\.keyword$/, '');
+    if (isTagField(base) && types.keyword !== undefined && types.keyword.aggregatable) tagFields.push(name);
+  });
+  if (tagFields.length === 0) {
+    console.log(`No tag fields found in ${index}.`);
+    return [];
+  }
+
+  const aggs = {};
+  tagFields.forEach((field, i) => {
+    aggs[`f${i}`] = { terms: { field, size: 10000 } };
+  });
+  const query = recent && dateField ? { range: { [dateField]: { gte: `now-${recent}` } } } : undefined;
+  const response = await es.search({
+    index, size: 0, query, aggs, ignore_unavailable: true,
+  });
+
+  const values = [];
+  Object.values(response.aggregations || {}).forEach((agg) => {
+    agg.buckets.forEach((b) => values.push(String(b.key).trim()));
+  });
+  console.log(`loaded ${values.length} tag values from ${index} fields:`, tagFields);
+  return values;
+}
+
 async function loadAlarmTags() {
   if (Date.now() - tagsCache.loadedAt < TAGS_TTL) return tagsCache.tags;
   console.log('loading alarm tags...');
-  try {
-    // only keyword fields can be aggregated; with dynamic mappings that is the .keyword subfield
-    const caps = await es.fieldCaps({ index: esAlarmsIndex, fields: ['tags', 'tags.*', 'source.*'] });
-    const fields = Object.entries(caps.fields)
-      .filter(([name, types]) => {
-        const base = name.replace(/\.keyword$/, '');
-        const isTagField = base === 'tags' || (base.startsWith('source.') && SITE_FIELD.test(base));
-        return isTagField && types.keyword !== undefined && types.keyword.aggregatable;
-      })
-      .map(([name]) => name);
-    if (fields.length === 0) {
-      console.log('No tag fields found.');
-      return tagsCache.tags;
-    }
-
-    const aggs = {};
-    fields.forEach((field, i) => {
-      aggs[`f${i}`] = { terms: { field, size: 10000 } };
-    });
-    const response = await es.search({ index: esAlarmsIndex, size: 0, aggs });
-
-    const tags = new Set();
-    Object.values(response.aggregations).forEach((agg) => {
-      agg.buckets.forEach((b) => tags.add(String(b.key).trim()));
-    });
-    // alerts.py splits subscription tags on spaces, so tags containing one can never match
-    tagsCache = {
-      loadedAt: Date.now(),
-      tags: [...tags]
-        .filter((t) => t && t !== '*' && !/\s/.test(t))
-        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
-    };
-    console.log(`loaded ${tagsCache.tags.length} tags from fields:`, fields);
-  } catch (err) {
-    console.error(err);
-  }
+  const tags = new Set();
+  // sources are independent: one failing (missing index, no permission) must not lose the others
+  const results = await Promise.allSettled(TAG_SOURCES.map(collectTerms));
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') r.value.forEach((v) => tags.add(v));
+    else console.error(`loading tags from ${TAG_SOURCES[i].index} failed:`, r.reason.message || r.reason);
+  });
+  if (tags.size === 0) return tagsCache.tags;
+  // alerts.py splits subscription tags on spaces, so tags containing one can never match
+  tagsCache = {
+    loadedAt: Date.now(),
+    tags: [...tags]
+      .filter((t) => t && t !== '*' && !/\s/.test(t))
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+  };
+  console.log(`${tagsCache.tags.length} tags available for suggestions.`);
   return tagsCache.tags;
 }
 

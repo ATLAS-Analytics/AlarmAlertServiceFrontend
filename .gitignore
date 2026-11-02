@@ -73,3 +73,6 @@ typings/
 
 # next.js build output
 .next
+
+# local helper for reading Elasticsearch through the tunnel
+helpers.py

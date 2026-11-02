@@ -102,12 +102,6 @@ function subscriptionsQuery(subscriptions) {
 // the "Ongoing issues" panel on the subscriptions page looks this far back
 const ONGOING_HOURS = 24;
 
-// events whose tags are elements of perfSONAR paths: their suggestions are the netsites
-// and networks (ASNs) of ps_trace instead of the general site list
-const PATH_TAG_EVENTS = [
-  { category: 'Networking', subcategory: 'Network', event: 'suspected path element' },
-];
-
 // only same-site paths are allowed as post-login destinations
 function safeReturnPath(p) {
   if (typeof p !== 'string' || !p.startsWith('/') || p.startsWith('//') || p.startsWith('/\\')) return null;
@@ -263,7 +257,6 @@ app.get('/subscriptions', requiresLogin, async (req, res) => {
       levels: alarmLevels,
       ongoing,
       ongoingHours: ONGOING_HOURS,
-      pathEvents: PATH_TAG_EVENTS,
       acknowledgements: userInfo.acknowledgements.filter((a) => a.until > now),
     },
   });

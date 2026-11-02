@@ -39,10 +39,6 @@
   data.alarms.concat(data.heartbeats).forEach((e) => descriptions.set(keyOf(e), e.description));
   // severity levels seen per event; only these events get a level picker
   const levelsByKey = new Map((data.levels || []).map((e) => [keyOf(e), e.levels]));
-  // only these events suggest networks (ASNs) as tags; elsewhere an ASN would never match
-  // path events are tagged with perfSONAR path elements (netsites and ASNs), all other events with sites
-  const pathEventKeys = new Set((data.pathEvents || []).map(keyOf));
-  const ASN_RE = /^AS\d+$/;
 
   // alerts.py splits subscription tags and levels on spaces and treats '*' (or a
   // missing value) as "all"; older entries may hold arrays or comma-separated strings.
@@ -79,12 +75,38 @@
   const expanded = new Set();
   let flashKeys = [];
 
-  let allTags = [];
-  let knownTags = new Map(); // lower case -> canonical
-  let pathTags = [];
-  let knownPathTags = new Map();
+  // tag suggestions (/alarm/tags): the traceroute sites, hosts and ASNs, and per event the
+  // kinds of tags its alarms carry plus those tags; events without alarms suggest sites
+  let tagLists = { site: [], host: [], asn: [] };
+  let seenTags = new Map(); // every site, host and ASN of the past month: lower case -> canonical
+  let eventTags = new Map();
+  const suggestionsByKey = new Map();
   let tagLabels = {}; // network names of ASN tags, e.g. { AS513: 'CERN, CH' }
   let tagsState = 'loading';
+  const KIND_NAMES = { site: ['site', 'sites'], host: ['host', 'hosts'], asn: ['ASN', 'ASNs'] };
+
+  const kindsOf = (sub) => (eventTags.has(keyOf(sub)) ? eventTags.get(keyOf(sub)).kinds : ['site']);
+  // 'site', 'site or ASN', 'host', or 'tag' for events whose tags are none of these
+  function tagNoun(sub, plural) {
+    const kinds = kindsOf(sub);
+    if (kinds.length === 0) return plural ? 'tags' : 'tag';
+    return kinds.map((k) => KIND_NAMES[k][plural ? 1 : 0]).join(' or ');
+  }
+
+  // { list, known (lower case -> canonical) }: the traceroute lists of the event's kinds and its alarms' own tags
+  function suggestionsFor(sub) {
+    if (tagsState !== 'ready') return { list: [], known: new Map() };
+    const key = keyOf(sub);
+    if (!suggestionsByKey.has(key)) {
+      const own = eventTags.has(key) ? eventTags.get(key).tags : [];
+      const known = new Map();
+      kindsOf(sub).flatMap((k) => tagLists[k]).concat(own).forEach((t) => {
+        if (!known.has(t.toLowerCase())) known.set(t.toLowerCase(), t);
+      });
+      suggestionsByKey.set(key, { list: [...known.values()].sort(collator.compare), known });
+    }
+    return suggestionsByKey.get(key);
+  }
 
   // network alarms tag ASNs as 'AS<number>' and alerts.py matches exactly, so 'as513' becomes 'AS513'
   function normalizeTag(value) {
@@ -93,6 +115,22 @@
     return asn ? `AS${asn[1]}` : v;
   }
   const tagFields = new Set();
+
+  // like alerts.py, a tag with '*' is a pattern: '*' stands for any characters, case-insensitively
+  const isPattern = (tag) => tag.includes('*');
+  const patternRegex = (pattern) => new RegExp(`^${pattern.split('*').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, 'i');
+  // what a pattern matches: the event's suggestions or, failing that, anything perfSONAR saw
+  // (e.g. a host pattern on an event without alarms this week, which suggests sites)
+  function patternMatches(sub, pattern) {
+    const regex = patternRegex(pattern);
+    const suggested = suggestionsFor(sub).list.filter((t) => regex.test(t));
+    return suggested.length ? suggested : [...seenTags.values()].filter((t) => regex.test(t));
+  }
+  const isKnown = (sub, tag) => suggestionsFor(sub).known.has(tag.toLowerCase()) || seenTags.has(tag.toLowerCase());
+  // why a tag isn't suggested: sites, hosts and ASNs come from a month of perfSONAR traceroutes,
+  // the tags of other events from their alarms of the past week
+  const notSeen = (sub) => (kindsOf(sub).length ? 'not seen in perfSONAR in the past month' : 'not seen in its alarms in the past week');
+  const listText = (items, max = 8) => items.slice(0, max).join(', ') + (items.length > max ? ` and ${items.length - max} more` : '');
 
   // ---- catalog tree ------------------------------------------------------
 
@@ -250,12 +288,13 @@
   let fieldId = 0;
 
   function tagField(sub) {
-    const pathOk = pathEventKeys.has(keyOf(sub));
-    const suggestions = () => (pathOk ? pathTags : allTags);
-    const known = () => (pathOk ? knownPathTags : knownTags);
+    const suggestions = () => suggestionsFor(sub).list;
+    const known = () => suggestionsFor(sub).known;
+    const box = el('div', 'sub-body');
     const field = el('div', 'tag-field');
     const input = document.createElement('input');
     const listbox = el('ul', 'suggestions');
+    const note = el('p', 'tag-note');
     const listId = `tag-suggestions-${fieldId++}`;
     let options = [];
     let active = -1;
@@ -267,18 +306,49 @@
     input.setAttribute('aria-autocomplete', 'list');
     input.setAttribute('aria-expanded', 'false');
     input.setAttribute('aria-controls', listId);
-    input.setAttribute('aria-label', `Sites for ${sub.event}`);
+    input.setAttribute('aria-label', `Tags for ${sub.event}`);
+    input.setAttribute('aria-describedby', `${listId}-note`);
     listbox.id = listId;
     listbox.setAttribute('role', 'listbox');
     listbox.hidden = true;
+    note.id = `${listId}-note`;
+    note.hidden = true;
+
+    // under the field: sites and hosts without perfSONAR measurements, patterns matching nothing
+    function renderNote(missing, unmatched) {
+      const lines = [];
+      if (missing.length) {
+        const one = missing.length === 1;
+        lines.push(`${missing.join(', ')} ${one ? 'wasn’t' : 'weren’t'} seen in perfSONAR in the past month: `
+          + `${one ? 'its toolkit is' : 'their toolkits are'} probably not working properly.`);
+      }
+      if (unmatched.length) lines.push(`${unmatched.join(', ')} ${unmatched.length === 1 ? 'matches' : 'match'} nothing seen recently.`);
+      note.textContent = lines.join(' ');
+      note.hidden = lines.length === 0;
+    }
 
     function renderChips() {
       field.querySelectorAll('.chip').forEach((c) => c.remove());
+      const kinds = kindsOf(sub);
+      const missing = [];
+      const unmatched = [];
       sub.tags.forEach((tag) => {
-        const custom = tagsState === 'ready' && !known().has(tag.toLowerCase());
-        const chip = el('span', custom ? 'chip chip-custom' : 'chip', tag);
-        if (custom) chip.title = 'Not found in any alarm so far';
-        else if (tagLabels[tag]) chip.title = tagLabels[tag];
+        let className = 'chip';
+        let title = tagLabels[tag] || '';
+        if (isPattern(tag)) {
+          className += ' chip-pattern';
+          if (tagsState === 'ready') {
+            const matches = patternMatches(sub, tag);
+            title = matches.length ? `Matches ${listText(matches)}` : 'Matches nothing seen recently';
+            if (!matches.length) unmatched.push(tag);
+          }
+        } else if (tagsState === 'ready' && !isKnown(sub, tag)) {
+          className += ' chip-custom';
+          title = `${tag}: ${notSeen(sub)}`;
+          if ((kinds.includes('site') || kinds.includes('host')) && !/^AS\d+$/.test(tag)) missing.push(tag);
+        }
+        const chip = el('span', className, tag);
+        if (title) chip.title = title;
         const x = el('button');
         x.type = 'button';
         x.innerHTML = ICON_X;
@@ -291,14 +361,16 @@
         chip.append(x);
         field.insertBefore(chip, input);
       });
-      if (pathOk) input.placeholder = sub.tags.length ? 'Add site or ASN…' : 'All sites · type a site or ASN';
-      else input.placeholder = sub.tags.length ? 'Add site…' : 'All sites · type to narrow down';
+      renderNote(missing, unmatched);
+      if (sub.tags.length) input.placeholder = `Add ${tagNoun(sub)}…`;
+      else if (kinds.length > 1) input.placeholder = `All ${KIND_NAMES[kinds[0]][1]} · type a ${tagNoun(sub)}`;
+      else input.placeholder = `All ${tagNoun(sub, true)} · type to narrow down`;
     }
 
     function addTag(raw) {
       const value = normalizeTag(raw);
       if (!value || value === '*') return;
-      const tag = known().get(value.toLowerCase()) || value;
+      const tag = known().get(value.toLowerCase()) || seenTags.get(value.toLowerCase()) || value;
       if (sub.tags.includes(tag)) return;
       sub.tags.push(tag);
       renderChips();
@@ -348,26 +420,37 @@
         const prefix = [];
         const inner = [];
         const byName = []; // ASNs whose network name matches, e.g. 'cern' -> AS513
+        // a typed pattern (e.g. *MWT2*) lists what it matches, and is offered first
+        const pattern = isPattern(typed) && typed !== '*' ? patternRegex(typed) : null;
         suggestions().forEach((t) => {
-          if (chosen.has(t) || (!pathOk && ASN_RE.test(t))) return;
+          if (chosen.has(t)) return;
           const l = t.toLowerCase();
-          if (!q || l.startsWith(q)) prefix.push(t);
+          if (pattern) {
+            if (pattern.test(t)) prefix.push(t);
+          } else if (!q || l.startsWith(q)) prefix.push(t);
           else if (l.includes(q)) inner.push(t);
-          else if (pathOk && tagLabels[t] && tagLabels[t].toLowerCase().includes(q)) byName.push(t);
+          else if (tagLabels[t] && tagLabels[t].toLowerCase().includes(q)) byName.push(t);
         });
         const matches = prefix.concat(inner, byName);
         options = matches.slice(0, MAX_SUGGESTIONS).map((value) => ({ value }));
         const typedTag = normalizeTag(typed);
         // a network name typed as a tag would never match, so don't offer it when names matched
         const onlyNames = byName.length > 0 && prefix.length === 0 && inner.length === 0;
-        if (q && !onlyNames && !known().has(typedTag.toLowerCase()) && !chosen.has(typedTag)) options.push({ value: typedTag, custom: true });
+        if (pattern) {
+          if (!chosen.has(typed)) options.unshift({ value: typed, pattern: patternMatches(sub, typed).length });
+        } else if (q && !onlyNames && !known().has(typedTag.toLowerCase()) && !chosen.has(typedTag)) {
+          options.push({ value: typedTag, custom: true });
+        }
 
         options.forEach((opt, i) => {
           const li = el('li', 'suggestion');
           li.id = `${listId}-${i}`;
           li.setAttribute('role', 'option');
-          if (opt.custom) {
-            li.append(el('span', '', `Add “${opt.value}”`), el('span', 'suggestion-hint', 'not seen in alarms'));
+          if (opt.pattern !== undefined) {
+            const n = opt.pattern;
+            li.append(el('span', '', `Add pattern “${opt.value}”`), el('span', 'suggestion-hint', n ? `matches ${n}` : 'matches nothing seen recently'));
+          } else if (opt.custom) {
+            li.append(el('span', '', `Add “${opt.value}”`), el('span', 'suggestion-hint', isKnown(sub, opt.value) ? 'seen in perfSONAR' : notSeen(sub)));
           } else {
             const at = opt.value.toLowerCase().indexOf(q);
             const label = el('span');
@@ -384,11 +467,11 @@
           listbox.append(li);
         });
         if (matches.length > MAX_SUGGESTIONS) info(`${matches.length - MAX_SUGGESTIONS} more · keep typing to narrow down`);
-        if (suggestions().length === 0 && !q) info('No sites found yet. Type a tag and press Enter.');
+        if (suggestions().length === 0 && !q) info(`No ${tagNoun(sub, true)} found yet. Type a tag and press Enter.`);
       } else if (tagsState === 'loading') {
-        info('Loading sites…');
+        info('Loading suggestions…');
       } else {
-        info('Couldn’t load sites. Type a tag and press Enter.');
+        info('Couldn’t load suggestions. Type a tag and press Enter.');
       }
 
       listbox.hidden = listbox.childElementCount === 0;
@@ -436,12 +519,13 @@
     });
 
     field.append(input, listbox);
+    box.append(field, note);
     renderChips();
     tagFields.add(() => {
       renderChips();
       if (document.activeElement === input) update();
     });
-    return field;
+    return box;
   }
 
   // ---- severity levels -------------------------------------------------------
@@ -495,8 +579,8 @@
     let body;
     // a choice needs at least two levels
     if (alarmKeys.has(key) && levelsByKey.has(key) && levelsByKey.get(key).length > 1) {
-      body = el('div', 'sub-body');
-      body.append(tagField(sub), levelPicker(sub, levelsByKey.get(key)));
+      body = tagField(sub);
+      body.append(levelPicker(sub, levelsByKey.get(key)));
     } else if (alarmKeys.has(key)) {
       body = tagField(sub);
     } else if (heartbeatKeys.has(key)) {
@@ -894,13 +978,14 @@
 
   // ---- tag suggestions -----------------------------------------------------
 
-  fetch('/alarm/tags?labels=1')
+  fetch('/alarm/tags')
     .then((res) => (res.ok ? res.json() : Promise.reject(new Error(res.status))))
-    .then(({ tags, pathTags: path, labels }) => {
-      allTags = tags;
-      knownTags = new Map(tags.map((t) => [t.toLowerCase(), t]));
-      pathTags = path || [];
-      knownPathTags = new Map(pathTags.map((t) => [t.toLowerCase(), t]));
+    .then(({
+      sites, hosts, asns, labels, events,
+    }) => {
+      tagLists = { site: sites, host: hosts, asn: asns };
+      seenTags = new Map([...sites, ...hosts, ...asns].map((t) => [t.toLowerCase(), t]));
+      eventTags = new Map(events.map((e) => [keyOf(e), e]));
       tagLabels = labels || {};
       tagsState = 'ready';
       // ongoing issues may list ASNs that now have a network name

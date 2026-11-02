@@ -58,6 +58,7 @@ const categories = [
   net('Infrastructure', 'complete packet loss', '100% packet loss on a link.'),
   net('Infrastructure', 'large clock correction', 'perfSONAR host clock drifted by more than 100 ms.'),
   net('Infrastructure', 'hosts not found', 'perfSONAR hosts registered in CRIC that do not report measurements.'),
+  net('Infrastructure', 'unresolvable host', 'perfSONAR hosts whose names do not resolve.'),
   net('RENs', 'path changed', 'The route between two sites changed compared to its usual path.'),
   net('RENs', 'ASN path anomalies', 'An unusual autonomous system appears on a path.'),
   {
@@ -72,25 +73,34 @@ const hbTopology = [
   { category: 'SLATE', subcategory: 'Squid', event: 'server down', description: 'This alarm gets generated if a squid instance does not send at least 4 heartbeats in last 60 seconds.', template: 'x', interval: 3600, min_expected: 4 },
   { category: 'Virtual Placement', subcategory: 'XCache', event: 'heartbeat missing', description: 'XCache node stopped sending heartbeats.', template: 'x', interval: 3600, min_expected: 2 },
 ];
-const sites = ['AGLT2', 'MWT2', 'BNL-ATLAS', 'SWT2_CPB', 'NET2', 'CERN-PROD', 'UKI-SOUTHGRID-BRIS-HEP', 'UKI-NORTHGRID-MAN-HEP',
-  'UKI-LT2-QMUL', 'IN2P3-CC', 'FZK-LCG2', 'INFN-T1', 'TRIUMF-LCG2', 'NDGF-T1', 'RAL-LCG2', 'pic', 'SARA-MATRIX', 'Taiwan-LCG2',
-  'TOKYO-LCG2', 'praguelcg2', 'DESY-HH', 'LRZ-LMU', 'IFIC-LCG2', 'GRIF', 'BEIJING-LCG2', 'Australia-ATLAS', 'CA-SFU-T2', 'WT2',
-  'MPPMU', 'IL-TAU-HEP', 'RO-07-NIPNE', 'UNI-FREIBURG', 'wuppertalprod', 'CSCS-LCG2', 'UAM-LCG2', 'INFN-NAPOLI-ATLAS'];
-const netsites = ['MWT2-UC', 'MWT2-IU', 'MWT2-UIUC', 'AGLT2-UM', 'AGLT2-MSU', 'BNL-ATLAS-LHCONE', 'CERN-PROD-LHCOPN', 'UC-AF'];
-const psNetsites = ['BNL-ATLAS-LHCOPN', 'CERN-PROD-LHCONE', 'FZK-LCG2-LHCOPN', 'IN2P3-CC-LHCONE', 'INFN-T1-LHCOPN', 'NDGF-T1-LHCONE',
-  'RAL-LCG2-LHCOPN', 'SARA-MATRIX-LHCOPN', 'TRIUMF-LCG2-LHCOPN', 'pic-LHCOPN', 'KIT-LHCONE', 'JINR-T1-LHCOPN', 'IHEP-LHCONE',
-  'NCBJ-CIS', 'UKI-SCOTGRID-GLASGOW', 'UKI-NORTHGRID-LANCS-HEP', 'IFCA-LCG2', 'CYFRONET-LCG2', 'GoeGrid', 'INFN-LNF', 'INFN-ROMA1'];
+const psNetsites = ['MWT2_UC', 'MWT2_IU', 'AGLT2_UM', 'AGLT2_MSU', 'BNL-ATLAS-LHCOPNE', 'CERN-PROD-LHCOPNE', 'FZK-LCG2-LHCOPNE',
+  'IN2P3-CC-LHCOPNE', 'INFN-T1-LHCOPNE', 'NDGF-T1-LHCOPNE', 'RAL-LCG2-LHCOPN', 'TRIUMF-LCG2-LHCOPNE', 'PIC-LHCOPNE', 'KIT-LHCONE',
+  'JINR-T1-LHCOPNE', 'UKI-SCOTGRID-GLASGOW', 'UKI-NORTHGRID-LANCS-HEP', 'UKI-NORTHGRID-MAN-HEP subnets', 'GLOW-LHCONE', 'INFN-ROMA1'];
+const psHosts = ['perfsonar01.cern.ch', 'perfsonar02.cern.ch', 'psmsu01.aglt2.org', 'psum01.aglt2.org', 'uct2-net1.mwt2.org',
+  'iut2-net1.iu.edu', 'lhcmon.bnl.gov', 'perfsonar-de-kit.gridka.de', 'ccperfsonar1.in2p3.fr', 'ps-latency.clumeq.mcgill.ca'];
+// ps_trace: a year of traceroutes
 const aggValues = {
-  'tags.keyword': [...sites, ...netsites, 'AS2200', 'AS513', 'University of Nowhere', '*'],
-  'source.src_site.keyword': sites.slice(0, 20),
-  'source.dest_netsite': netsites,
-  'source.site': ['MWT2', 'AGLT2', 'SiteOnlyInSource'],
   src_netsite: psNetsites,
   dest_netsite: psNetsites.slice(5),
-  src_site: sites.slice(10),
+  src_host: psHosts,
+  dest_host: psHosts.slice(3),
   // networks on traceroute paths; 0 marks an unknown hop
   asns: [513, 2200, 39590, 786, 3, 0],
 };
+// aaas_alarms: the tags each event's alarms carried over the past year
+const eventTags = [
+  { category: 'Networking', subcategory: 'Sites', event: 'high packet loss', tags: ['MWT2', 'AGLT2', 'BNL-ATLAS', 'MWT2_UC'] },
+  { category: 'Networking', subcategory: 'Sites', event: 'bandwidth decreased', tags: ['BNL-ATLAS', 'PIC-LHCOPNE'] },
+  { category: 'Networking', subcategory: 'RENs', event: 'path changed', tags: ['MWT2', 'AGLT2', 'CERN-PROD', 'KIT-LHCONE'] },
+  { category: 'Networking', subcategory: 'Network', event: 'suspected path element', tags: ['AS2200', 'AS513', 'CERN-PROD-LHCOPNE', 'UKI-NORTHGRID-MAN-HEP_SUBNETS'] },
+  { category: 'Networking', subcategory: 'Infrastructure', event: 'unresolvable host', tags: ['ps-latency.clumeq.mcgill.ca', 'bdw.scinet.utoronto.ca'] },
+  // tagged with both sites and hosts: suggests both lists
+  { category: 'Networking', subcategory: 'Infrastructure', event: 'hosts not found', tags: ['AGLT2_UM', 'psum01.aglt2.org'] },
+  { category: 'Analytics', subcategory: 'Frontier', event: 'Failed queries', tags: ['atlasfrontier2-dev.cern.ch'] },
+  { category: 'Analytics', subcategory: 'Frontier', event: 'Bad SQL queries', tags: [] },
+  { category: 'Analytics', subcategory: 'Elasticsearch', event: 'cluster status', tags: ['red', 'yellow'] },
+  { category: 'Virtual Placement', subcategory: 'XCache', event: 'dead server', tags: ['BNL', 'MWT2', 'RHUL', 'University of Nowhere'] },
+];
 // ps_asns_1: network owner by ASN
 const asnOwners = {
   513: 'CERN, CH', 2200: 'FR-RENATER Reseau National de telecommunications pour la Tec', 39590: 'NDGF High energy physicists community in the nordics., SE', 786: 'JANET Jisc Services Limited, GB', 3: 'MIT-GATEWAYS, US',
@@ -187,8 +197,15 @@ class FakeES {
       };
       return { hits: { total: { value: 0 }, hits: [] }, aggregations };
     }
+    if (p.index === 'aaas_alarms' && p.aggs && p.aggs.events) {
+      // category|subcategory|event > tags aggregation (loadEventTags)
+      const buckets = eventTags.map((e) => ({
+        key: [e.category, e.subcategory, e.event], tags: { buckets: e.tags.map((key) => ({ key, doc_count: 1 })) },
+      }));
+      return { hits: { total: { value: 0 }, hits: [] }, aggregations: { events: { buckets } } };
+    }
     if (p.index === 'aaas_alarms' && !p.aggs) return hits(recentAlarms);
-    if ((p.index === 'aaas_alarms' || p.index.startsWith('ps_trace')) && p.aggs) {
+    if (p.index === 'ps_trace' && p.aggs) {
       await delay(400);
       global.FAKE.lastQuery = global.FAKE.lastQuery || {};
       global.FAKE.lastQuery[p.index] = p.query;
@@ -205,25 +222,11 @@ class FakeES {
   async fieldCaps(p) {
     const kw = { keyword: { type: 'keyword', aggregatable: true } };
     const text = { text: { type: 'text', aggregatable: false } };
-    if (p.index.startsWith('ps_trace')) {
-      return {
-        indices: ['ps_trace'],
-        fields: {
-          src_netsite: kw, dest_netsite: kw, src_site: kw, dest_site: text, timestamp: { date: { type: 'date', aggregatable: true } },
-        },
-      };
-    }
     return {
       indices: ['aaas_alarms'],
       fields: {
         tags: text,
         'tags.keyword': kw,
-        'source.src_site': text,
-        'source.src_site.keyword': kw,
-        'source.dest_netsite': kw,
-        'source.site': kw,
-        'source.avg_value': { float: { type: 'float', aggregatable: true } },
-        'source.host_src': kw,
         category: kw,
         subcategory: kw,
         event: kw,

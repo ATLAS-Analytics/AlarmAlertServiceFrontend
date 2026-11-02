@@ -9,23 +9,24 @@ let config;
 let es;
 const categories = [];
 
-// tag suggestions for the subscriptions page: every value of alarm `tags` and of the
-// site / netsite fields in alarms' `source` and in recent perfSONAR traces, refreshed hourly.
+// Tag suggestions for the subscriptions page come from the perfSONAR traceroutes (ps_trace) of
+// the past month: every src/dest netsite, src/dest host and network (ASN). A site or host that
+// is missing has had no measurements for a month, so its toolkit is probably not working.
+// What an event's alarms of the past week are tagged with decides which of these lists it
+// suggests (see loadTagSuggestions). Both are refreshed hourly.
+const TRACE_TAGS_PERIOD = '1M';
+const ALARM_TAGS_PERIOD = '7d';
 const TAGS_TTL = 3600 * 1000;
-const SITE_FIELD = /(^|[._])(net)?sites?(_(src|dest))?$/i;
 const TRACE_INDEX = 'ps_trace';
-const TAG_SOURCES = [
-  { index: 'aaas_alarms', fields: ['tags', 'tags.*', 'source.*'], isTagField: (f) => f === 'tags' || (f.startsWith('source.') && SITE_FIELD.test(f)) },
-  { index: TRACE_INDEX, fields: ['*site*', 'timestamp', '@timestamp'], isTagField: (f) => SITE_FIELD.test(f), recent: '30d' },
-];
-// "path" events (e.g. suspected path element) are tagged with elements of perfSONAR paths
-// instead: every src/dest netsite and every network (ASN) ever seen in ps_trace. That
-// aggregation runs over all of ps_trace (~20 s), so it is refreshed daily.
-const PATH_TAGS_TTL = 24 * 3600 * 1000;
 // network alarms tag ASNs as 'AS<number>'; ps_asns_1 holds each ASN's owner, keyed by the number
 const ASN_TAG = /^AS(\d+)$/;
 const ASN_OWNERS_INDEX = 'ps_asns_1';
+// a host name or IP address, e.g. ps-latency.clumeq.mcgill.ca
+const HOST_TAG = /^([a-z0-9-]+\.)+[a-z]{2,}$|^\d{1,3}(\.\d{1,3}){3}$|^[0-9a-f]*:[0-9a-f:]+$/i;
 const byTagName = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
+// alerts.py splits subscription tags on spaces, so tags containing one can never match
+const usableTag = (t) => t !== '' && t !== '*' && !/\s/.test(t);
+const termKeys = (agg) => agg.buckets.map((b) => String(b.key).trim());
 
 // severity levels for the subscriptions page: which events' alarms carry a
 // `level`, and the values seen, refreshed hourly.
@@ -76,41 +77,6 @@ async function loadAlarmTopology() {
     console.error(err);
     return false;
   }
-}
-
-// distinct values of every aggregatable field in `index` that `isTagField` accepts
-async function collectTerms({
-  index, fields, isTagField, recent,
-}) {
-  // only keyword fields can be aggregated; with dynamic mappings that is the .keyword subfield
-  const caps = await es.fieldCaps({ index, fields, ignore_unavailable: true });
-  const tagFields = [];
-  let dateField;
-  Object.entries(caps.fields).forEach(([name, types]) => {
-    if (types.date !== undefined) dateField = dateField || name;
-    const base = name.replace(/\.keyword$/, '');
-    if (isTagField(base) && types.keyword !== undefined && types.keyword.aggregatable) tagFields.push(name);
-  });
-  if (tagFields.length === 0) {
-    console.log(`No tag fields found in ${index}.`);
-    return [];
-  }
-
-  const aggs = {};
-  tagFields.forEach((field, i) => {
-    aggs[`f${i}`] = { terms: { field, size: 10000 } };
-  });
-  const query = recent && dateField ? { range: { [dateField]: { gte: `now-${recent}` } } } : undefined;
-  const response = await es.search({
-    index, size: 0, query, aggs, ignore_unavailable: true,
-  });
-
-  const values = [];
-  Object.values(response.aggregations || {}).forEach((agg) => {
-    agg.buckets.forEach((b) => values.push(String(b.key).trim()));
-  });
-  console.log(`loaded ${values.length} tag values from ${index} fields:`, tagFields);
-  return values;
 }
 
 // { 'AS513': 'CERN, CH', ... } for the given ASN tags
@@ -164,48 +130,96 @@ function cached(ttl, load, empty) {
   };
 }
 
-// { tags, labels } for every event but the path events
-const loadAlarmTags = cached(TAGS_TTL, async () => {
-  console.log('loading alarm tags...');
-  const tags = new Set();
-  // sources are independent: one failing (missing index, no permission) must not lose the others
-  const results = await Promise.allSettled(TAG_SOURCES.map(collectTerms));
-  results.forEach((r, i) => {
-    if (r.status === 'fulfilled') r.value.forEach((v) => tags.add(v));
-    else console.error(`loading tags from ${TAG_SOURCES[i].index} failed:`, r.reason.message || r.reason);
-  });
-  if (tags.size === 0) return null;
-  // alerts.py splits subscription tags on spaces, so tags containing one can never match
-  const list = [...tags].filter((t) => t && t !== '*' && !/\s/.test(t)).sort(byTagName);
-  const labels = await namedAsns(list);
-  console.log(`${list.length} tags available for suggestions.`);
-  return { tags: list, labels };
-}, { tags: [], labels: {} });
-
-// { tags, labels } for the path events: all netsites and ASNs of ps_trace
-const loadPathTags = cached(PATH_TAGS_TTL, async () => {
-  console.log('loading path tags (all of ps_trace)...');
+// { sites, hosts, asns, labels }: the netsites, hosts and networks of a month of traceroutes
+const loadTraceTags = cached(TAGS_TTL, async () => {
+  console.log('loading traceroute tags...');
+  const terms = (field) => ({ terms: { field, size: 20000 } });
   const response = await es.search({
     index: TRACE_INDEX,
     size: 0,
+    query: { range: { timestamp: { gte: `now-${TRACE_TAGS_PERIOD}` } } },
     aggs: {
-      src: { terms: { field: 'src_netsite', size: 20000 } },
-      dest: { terms: { field: 'dest_netsite', size: 20000 } },
-      asns: { terms: { field: 'asns', size: 20000 } },
+      src_netsite: terms('src_netsite'),
+      dest_netsite: terms('dest_netsite'),
+      src_host: terms('src_host'),
+      dest_host: terms('dest_host'),
+      asns: terms('asns'),
     },
   }, { requestTimeout: 300000 });
-  const netsites = new Set([...response.aggregations.src.buckets, ...response.aggregations.dest.buckets]
-    .map((b) => String(b.key).trim())
-    .filter((t) => t && !/\s/.test(t)));
-  const asns = response.aggregations.asns.buckets
-    .map((b) => Number(b.key))
-    .filter((n) => Number.isInteger(n) && n > 0) // 0 marks an unknown hop
+  const a = response.aggregations;
+  const distinct = (...aggs) => [...new Set(aggs.flatMap(termKeys))].filter(usableTag).sort(byTagName);
+  const sites = distinct(a.src_netsite, a.dest_netsite);
+  const hosts = distinct(a.src_host, a.dest_host);
+  const asns = distinct(a.asns)
+    .filter((n) => Number.isInteger(Number(n)) && Number(n) > 0) // 0 marks an unknown hop
     .map((n) => `AS${n}`);
-  if (netsites.size + asns.length === 0) return null;
+  if (sites.length + hosts.length + asns.length === 0) return null;
   const labels = await namedAsns(asns);
-  console.log(`path tags: ${netsites.size} netsites, ${asns.length} ASNs (${Object.keys(labels).length} named).`);
-  return { tags: [...netsites, ...asns].sort(byTagName), labels };
-}, { tags: [], labels: {} });
+  console.log(`traceroute tags: ${sites.length} netsites, ${hosts.length} hosts, ${asns.length} ASNs (${Object.keys(labels).length} named).`);
+  return {
+    sites, hosts, asns, labels,
+  };
+}, {
+  sites: [], hosts: [], asns: [], labels: {},
+});
+
+// { events: [{ category, subcategory, event, tags }], labels }: the tags each event's
+// alarms carried over the past week, and the network names of the ASNs among them
+const loadEventTags = cached(TAGS_TTL, async () => {
+  console.log('loading alarm tags...');
+  const caps = await es.fieldCaps({
+    index: esAlarmsIndex, fields: ['tags', 'tags.*', 'category', 'category.*', 'subcategory', 'subcategory.*', 'event', 'event.*'],
+  });
+  const [tags, category, subcategory, event] = ['tags', 'category', 'subcategory', 'event'].map((f) => aggregatableField(caps, f));
+  if (!tags || !category || !subcategory || !event) {
+    console.log('No tags field found in alarms.');
+    return null;
+  }
+  const response = await es.search({
+    index: esAlarmsIndex,
+    size: 0,
+    query: { range: { created_at: { gte: `now-${ALARM_TAGS_PERIOD}` } } },
+    aggs: {
+      events: {
+        multi_terms: { terms: [{ field: category }, { field: subcategory }, { field: event }], size: 1000 },
+        aggs: { tags: { terms: { field: tags, size: 10000 } } },
+      },
+    },
+  });
+  const events = response.aggregations.events.buckets.map((b) => {
+    const [c, s, e] = b.key.map(String);
+    return {
+      category: c, subcategory: s, event: e, tags: termKeys(b.tags).filter((t) => t !== '').sort(byTagName),
+    };
+  });
+  const labels = await namedAsns([...new Set(events.flatMap((e) => e.tags))]);
+  console.log(`loaded the tags of ${events.length} events.`);
+  return { events, labels };
+}, { events: [], labels: {} });
+
+// Tag suggestions for the subscriptions page: { sites, hosts, asns, labels, events }.
+// For each event that had alarms in the past week, `events` holds its own tags and `kinds`:
+// which traceroute lists it suggests, by what those tags are. 'site' if any is a netsite,
+// 'host' if any is a host name, 'asn' if any is a network; none for e.g. user names.
+// Events missing from `events` suggest sites.
+async function loadTagSuggestions() {
+  const [trace, alarmTags] = await Promise.all([loadTraceTags(), loadEventTags()]);
+  const netsites = new Set(trace.sites.map((t) => t.toLowerCase()));
+  const events = alarmTags.events.map((e) => {
+    const kinds = [];
+    if (e.tags.some((t) => netsites.has(t.toLowerCase()))) kinds.push('site');
+    if (e.tags.some((t) => HOST_TAG.test(t))) kinds.push('host');
+    if (e.tags.some((t) => ASN_TAG.test(t))) kinds.push('asn');
+    return { ...e, kinds, tags: e.tags.filter(usableTag) };
+  });
+  return {
+    sites: trace.sites,
+    hosts: trace.hosts,
+    asns: trace.asns,
+    labels: { ...alarmTags.labels, ...trace.labels },
+    events,
+  };
+}
 
 // `name` itself if it can be aggregated, else its .keyword subfield (dynamic mappings)
 function aggregatableField(caps, name) {
@@ -267,6 +281,14 @@ async function loadAlarmLevels() {
   return levelsCache.levels;
 }
 
+// same rules as tag_matched() in alerts.py: a subscription tag matches an alarm tag exactly or,
+// if it contains '*', case-insensitively with '*' standing for any characters (*MWT2* matches MWT2_UC)
+function tagMatches(pattern, tag) {
+  if (!pattern.includes('*')) return pattern === tag;
+  const regex = pattern.split('*').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+  return new RegExp(`^${regex}$`, 'i').test(tag);
+}
+
 // same rules as level_ok() in alerts.py
 function levelMatches(sub, alarm) {
   const levels = sub.levels === undefined ? '*' : sub.levels;
@@ -307,7 +329,7 @@ async function loadOngoingIssues(subscriptions, hours) {
       if (!sub || al.tags === undefined || al.tags === null || !levelMatches(sub, al)) return;
       const wanted = sub.tags === undefined || sub.tags === '*' ? null : String(sub.tags).split(' ');
       (Array.isArray(al.tags) ? al.tags : [al.tags]).forEach((tag) => {
-        if (!tag || (wanted && !wanted.includes(tag))) return;
+        if (!tag || (wanted && !wanted.some((p) => tagMatches(p, tag)))) return;
         const key = JSON.stringify([al.category, al.subcategory, al.event, tag]);
         const issue = issues.get(key) || {
           category: al.category, subcategory: al.subcategory, event: al.event, tag, count: 0, last: 0, levels: {},
@@ -331,8 +353,7 @@ function init(configuration) {
   config.REQUIRED_ALARM_TOPOLOGY_FIELDS = config.REQUIRED_ALARM_TOPOLOGY_FIELDS.concat(config.TOPOLOGY_FIELDS);
   es = new elasticsearch.Client(config.ES_HOST);
   loadAlarmTopology();
-  loadAlarmTags();
-  loadPathTags();
+  loadTagSuggestions();
   loadAlarmLevels();
 }
 
@@ -389,16 +410,8 @@ router.get('/categories', async (req, res) => {
   res.json(categories);
 });
 
-// a plain array of tags; with ?labels=1 { tags, pathTags, labels }: also the tags of the
-// path events and the network names of ASN tags
 router.get('/tags', async (req, res) => {
-  const general = await loadAlarmTags();
-  if (!req.query.labels) {
-    res.json(general.tags);
-    return;
-  }
-  const paths = await loadPathTags();
-  res.json({ tags: general.tags, pathTags: paths.tags, labels: { ...general.labels, ...paths.labels } });
+  res.json(await loadTagSuggestions());
 });
 
 router.get('/levels', async (req, res) => {

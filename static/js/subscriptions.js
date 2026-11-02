@@ -76,8 +76,8 @@
   let flashKeys = [];
 
   // tag suggestions (/alarm/tags): the traceroute sites, hosts and ASNs, and per event the
-  // kinds of tags its alarms carry plus those tags; events without alarms this week could be
-  // tagged with either sites or hosts, so they suggest both
+  // kinds of tags its alarms carry plus its tags of the past week; events without alarms are
+  // taken to be about sites, like most
   let tagLists = { site: [], host: [], asn: [] };
   let seenTags = new Map(); // every site, host and ASN of the past month: lower case -> canonical
   let seenKinds = new Map(); // and what it is: lower case -> 'site', 'host' or 'asn'
@@ -87,7 +87,7 @@
   let tagsState = 'loading';
   const KIND_NAMES = { site: ['site', 'sites'], host: ['host', 'hosts'], asn: ['ASN', 'ASNs'] };
 
-  const kindsOf = (sub) => (eventTags.has(keyOf(sub)) ? eventTags.get(keyOf(sub)).kinds : ['site', 'host']);
+  const kindsOf = (sub) => (eventTags.has(keyOf(sub)) ? eventTags.get(keyOf(sub)).kinds : ['site']);
   // 'site', 'site or ASN', 'host', or 'tag' for events whose tags are none of these
   function tagNoun(sub, plural) {
     const kinds = kindsOf(sub);
@@ -121,12 +121,10 @@
   // like alerts.py, tags match ignoring case and '*' in a tag (a pattern) stands for any characters
   const isPattern = (tag) => tag.includes('*');
   const patternRegex = (pattern) => new RegExp(`^${pattern.split('*').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, 'i');
-  // what a pattern matches: the event's suggestions or, failing that, anything perfSONAR saw
-  // (e.g. a host pattern on an event whose alarms this week were tagged with sites)
+  // what a pattern matches among the event's suggestions
   function patternMatches(sub, pattern) {
     const regex = patternRegex(pattern);
-    const suggested = suggestionsFor(sub).list.filter((t) => regex.test(t));
-    return suggested.length ? suggested : [...seenTags.values()].filter((t) => regex.test(t));
+    return suggestionsFor(sub).list.filter((t) => regex.test(t));
   }
   const isKnown = (sub, tag) => suggestionsFor(sub).known.has(tag.toLowerCase()) || seenTags.has(tag.toLowerCase());
   // why a tag isn't suggested: sites, hosts and ASNs come from a month of perfSONAR traceroutes,
@@ -140,6 +138,9 @@
     if (HOST_TAG.test(tag)) return 'host';
     return kindsOf(sub).includes('site') ? 'site' : 'tag';
   }
+  // only events whose alarms are tagged with hosts take hosts: on the others a host never matches
+  const refusedHost = (sub, tag) => tagsState === 'ready' && !kindsOf(sub).includes('host') && kindOfTag(sub, tag) === 'host';
+  const NO_HOSTS = 'this event’s alarms aren’t tagged with hosts';
   // e.g. '2 sites, 3 hosts'
   function countByKind(sub, tags) {
     const counts = new Map();
@@ -334,9 +335,14 @@
     note.id = `${listId}-note`;
     note.hidden = true;
 
-    // under the field: sites and hosts without perfSONAR measurements, patterns matching nothing
-    function renderNote(missing, unmatched) {
+    // under the field: hosts on events without them, sites and hosts without perfSONAR
+    // measurements, patterns matching nothing
+    function renderNote(hosts, missing, unmatched) {
       const lines = [];
+      if (hosts.length) {
+        const one = hosts.length === 1;
+        lines.push(`${hosts.join(', ')} ${one ? 'is a host' : 'are hosts'}, but ${NO_HOSTS}, so ${one ? 'it never matches' : 'they never match'}.`);
+      }
       if (missing.length) {
         const one = missing.length === 1;
         lines.push(`${missing.join(', ')} ${one ? 'wasn’t' : 'weren’t'} seen in perfSONAR in the past month: `
@@ -350,6 +356,7 @@
     function renderChips() {
       field.querySelectorAll('.chip').forEach((c) => c.remove());
       const kinds = kindsOf(sub);
+      const hosts = [];
       const missing = [];
       const unmatched = [];
       sub.tags.forEach((tag) => {
@@ -362,6 +369,10 @@
             title = matches.length ? `Matches ${listText(matches)}` : 'Matches nothing seen recently';
             if (!matches.length) unmatched.push(tag);
           }
+        } else if (refusedHost(sub, tag)) {
+          className += ' chip-custom';
+          title = `${tag}: a host, but ${NO_HOSTS}`;
+          hosts.push(tag);
         } else if (tagsState === 'ready' && !isKnown(sub, tag)) {
           className += ' chip-custom';
           title = `${tag}: ${notSeen(sub)}`;
@@ -381,7 +392,7 @@
         chip.append(x);
         field.insertBefore(chip, input);
       });
-      renderNote(missing, unmatched);
+      renderNote(hosts, missing, unmatched);
       if (sub.tags.length) input.placeholder = `Add ${tagNoun(sub)}…`;
       else if (kinds.length > 1) input.placeholder = `All ${KIND_NAMES[kinds[0]][1]} · type a ${tagNoun(sub)}`;
       else input.placeholder = `All ${tagNoun(sub, true)} · type to narrow down`;
@@ -389,7 +400,7 @@
 
     function addTag(raw) {
       const value = normalizeTag(raw);
-      if (!value || value === '*') return;
+      if (!value || value === '*' || refusedHost(sub, value)) return;
       const tag = known().get(value.toLowerCase()) || seenTags.get(value.toLowerCase()) || value;
       if (sub.tags.some((t) => t.toLowerCase() === tag.toLowerCase())) return;
       sub.tags.push(tag);
@@ -456,9 +467,10 @@
         const typedTag = normalizeTag(typed);
         // a network name typed as a tag would never match, so don't offer it when names matched
         const onlyNames = byName.length > 0 && prefix.length === 0 && inner.length === 0;
+        const refused = !pattern && q && refusedHost(sub, typedTag);
         if (pattern) {
           if (!chosen.has(q)) options.unshift({ value: typed, matches: patternMatches(sub, typed) });
-        } else if (q && !onlyNames && !known().has(typedTag.toLowerCase()) && !chosen.has(typedTag.toLowerCase())) {
+        } else if (q && !refused && !onlyNames && !known().has(typedTag.toLowerCase()) && !chosen.has(typedTag.toLowerCase())) {
           options.push({ value: typedTag, custom: true });
         }
 
@@ -472,7 +484,7 @@
             const hint = opt.matches.length ? `matches ${countByKind(sub, opt.matches)}` : 'matches nothing seen recently';
             li.append(el('span', '', `Add pattern “${opt.value}”`), el('span', 'suggestion-hint', hint));
           } else if (opt.custom) {
-            // e.g. a host typed for an event whose alarms this week were tagged with sites
+            // e.g. a host typed for an event whose alarms are tagged with sites
             const kind = seenKinds.get(opt.value.toLowerCase());
             li.append(el('span', '', `Add “${opt.value}”`), el('span', 'suggestion-hint', kind ? `${KIND_NAMES[kind][0]} seen in perfSONAR` : notSeen(sub)));
           } else {
@@ -492,6 +504,7 @@
           listbox.append(li);
         });
         if (matches.length > MAX_SUGGESTIONS) info(`${matches.length - MAX_SUGGESTIONS} more · keep typing to narrow down`);
+        if (refused) info(`“${typedTag}” is a host, but ${NO_HOSTS}.`);
         if (suggestions().length === 0 && !q) info(`No ${tagNoun(sub, true)} found yet. Type a tag and press Enter.`);
       } else if (tagsState === 'loading') {
         info('Loading suggestions…');
@@ -529,7 +542,7 @@
       } else if (e.key === 'Enter') {
         e.preventDefault();
         if (!listbox.hidden && active >= 0) choose(active);
-        else if (input.value.trim()) {
+        else if (input.value.trim() && !refusedHost(sub, normalizeTag(input.value))) {
           addTag(input.value);
           input.value = '';
           update();

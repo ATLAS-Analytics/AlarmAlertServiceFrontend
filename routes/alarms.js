@@ -12,10 +12,11 @@ const categories = [];
 // Tag suggestions for the subscriptions page come from the perfSONAR traceroutes (ps_trace) of
 // the past month: every src/dest netsite, src/dest host and network (ASN). A site or host that
 // is missing has had no measurements for a month, so its toolkit is probably not working.
-// What an event's alarms of the past week are tagged with decides which of these lists it
-// suggests (see loadTagSuggestions). Both are refreshed hourly.
+// What an event's latest alarms are tagged with decides which of these lists it suggests
+// (see loadTagSuggestions). Both are refreshed hourly.
 const TRACE_TAGS_PERIOD = '1M';
 const ALARM_TAGS_PERIOD = '7d';
+const LATEST_ALARMS = 50;
 const TAGS_TTL = 3600 * 1000;
 const TRACE_INDEX = 'ps_trace';
 // network alarms tag ASNs as 'AS<number>'; ps_asns_1 holds each ASN's owner, keyed by the number
@@ -29,7 +30,7 @@ const usableTag = (t) => t !== '' && t !== '*' && !/\s/.test(t);
 const termKeys = (agg) => agg.buckets.map((b) => String(b.key).trim());
 
 // severity levels for the subscriptions page: which events' alarms carry a
-// `level`, and the values seen, refreshed hourly.
+// `level`, and the values seen across all of them, refreshed hourly.
 const AGGREGATABLE_TYPES = ['keyword', 'long', 'integer', 'short', 'byte', 'double', 'float'];
 let levelsCache = { loadedAt: 0, levels: [] };
 
@@ -163,8 +164,9 @@ const loadTraceTags = cached(TAGS_TTL, async () => {
   sites: [], hosts: [], asns: [], labels: {},
 });
 
-// { events: [{ category, subcategory, event, tags }], labels }: the tags each event's
-// alarms carried over the past week, and the network names of the ASNs among them
+// { events: [{ category, subcategory, event, tags, latest }], labels }: for every event with
+// alarms, the tags they carried over the past week, the tags of its latest alarms however old,
+// and the network names of the ASNs among the former
 const loadEventTags = cached(TAGS_TTL, async () => {
   console.log('loading alarm tags...');
   const caps = await es.fieldCaps({
@@ -178,18 +180,28 @@ const loadEventTags = cached(TAGS_TTL, async () => {
   const response = await es.search({
     index: esAlarmsIndex,
     size: 0,
-    query: { range: { created_at: { gte: `now-${ALARM_TAGS_PERIOD}` } } },
     aggs: {
       events: {
         multi_terms: { terms: [{ field: category }, { field: subcategory }, { field: event }], size: 1000 },
-        aggs: { tags: { terms: { field: tags, size: 10000 } } },
+        aggs: {
+          week: {
+            filter: { range: { created_at: { gte: `now-${ALARM_TAGS_PERIOD}` } } },
+            aggs: { tags: { terms: { field: tags, size: 10000 } } },
+          },
+          latest: { top_hits: { size: LATEST_ALARMS, sort: [{ created_at: 'desc' }], _source: ['tags'] } },
+        },
       },
     },
   });
   const events = response.aggregations.events.buckets.map((b) => {
     const [c, s, e] = b.key.map(String);
+    const latest = b.latest.hits.hits.flatMap((h) => [].concat(h._source.tags ?? []).map((t) => String(t).trim()));
     return {
-      category: c, subcategory: s, event: e, tags: termKeys(b.tags).filter((t) => t !== '').sort(byTagName),
+      category: c,
+      subcategory: s,
+      event: e,
+      tags: termKeys(b.week.tags).filter((t) => t !== '').sort(byTagName),
+      latest: [...new Set(latest)].filter((t) => t !== ''),
     };
   });
   const labels = await namedAsns([...new Set(events.flatMap((e) => e.tags))]);
@@ -198,18 +210,19 @@ const loadEventTags = cached(TAGS_TTL, async () => {
 }, { events: [], labels: {} });
 
 // Tag suggestions for the subscriptions page: { sites, hosts, asns, labels, events }.
-// For each event that had alarms in the past week, `events` holds its own tags and `kinds`:
-// which traceroute lists it suggests, by what those tags are. 'site' if any is a netsite,
-// 'host' if any is a host name, 'asn' if any is a network; none for e.g. user names.
-// Events missing from `events` could be tagged with either, so they suggest sites and hosts.
+// For each event with alarms, `events` holds its tags of the past week and `kinds`: which
+// traceroute lists it suggests, by what its latest alarms are tagged with. 'site' if any tag is
+// a netsite, 'host' if any is a host name, 'asn' if any is a network; none for e.g. user names.
+// Most events are about sites, so those missing from `events` suggest sites.
 async function loadTagSuggestions() {
   const [trace, alarmTags] = await Promise.all([loadTraceTags(), loadEventTags()]);
   const netsites = new Set(trace.sites.map((t) => t.toLowerCase()));
-  const events = alarmTags.events.map((e) => {
+  const events = alarmTags.events.map(({ latest, ...e }) => {
+    const seen = e.tags.concat(latest);
     const kinds = [];
-    if (e.tags.some((t) => netsites.has(t.toLowerCase()))) kinds.push('site');
-    if (e.tags.some((t) => HOST_TAG.test(t))) kinds.push('host');
-    if (e.tags.some((t) => ASN_TAG.test(t))) kinds.push('asn');
+    if (seen.some((t) => netsites.has(t.toLowerCase()))) kinds.push('site');
+    if (seen.some((t) => HOST_TAG.test(t))) kinds.push('host');
+    if (seen.some((t) => ASN_TAG.test(t))) kinds.push('asn');
     return { ...e, kinds, tags: e.tags.filter(usableTag) };
   });
   return {
@@ -234,7 +247,8 @@ function sortLevels(values) {
   return values.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 }
 
-// [{ category, subcategory, event, levels }] for every event whose alarms have a `level`
+// [{ category, subcategory, event, levels }] for every event whose alarms have a `level`;
+// `levels` are all the values seen, whichever event they came from
 async function loadAlarmLevels() {
   if (Date.now() - levelsCache.loadedAt < TAGS_TTL) return levelsCache.levels;
   console.log('loading alarm levels...');
@@ -259,7 +273,7 @@ async function loadAlarmLevels() {
       },
     });
 
-    const levels = [];
+    let levels = [];
     response.aggregations.category.buckets.forEach((c) => {
       c.subcategory.buckets.forEach((s) => {
         s.event.buckets.forEach((e) => {
@@ -273,6 +287,10 @@ async function loadAlarmLevels() {
         });
       });
     });
+    // the levels form one scale across alarm types: an event that so far only raised major
+    // alarms can raise minor ones too, so every event with levels offers all of them
+    const scale = sortLevels([...new Set(levels.flatMap((e) => e.levels))]);
+    levels = levels.map((e) => ({ ...e, levels: scale }));
     levelsCache = { loadedAt: Date.now(), levels };
     console.log(`loaded levels for ${levels.length} events from field ${level}.`);
   } catch (err) {

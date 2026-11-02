@@ -21,9 +21,9 @@ ATLAS Alarm & Alert Service provides a simple way to store generated alarms, han
 
 On the [Subscriptions](/subscriptions) page, tick the events you want to hear about.
 Each subscription can be narrowed down with **tags**: usually network-site names.
-The suggestions follow what the event's alarms of the past week are tagged with: perfSONAR netsites for most network alarms, also networks (ASNs such as `AS513`) for path alarms such as *suspected path element*, and perfSONAR host names for alarms about hosts such as *unresolvable host*.
-Events without alarms in the past week could be tagged with either, so they suggest both sites and hosts.
-They are the netsites, hosts and networks seen in perfSONAR traceroutes over the past month. A site or host that is missing has had no measurements for a month, so its perfSONAR toolkit is probably not working properly; the page points this out.
+The suggestions follow what the event's latest alarms are tagged with: perfSONAR netsites for most network alarms, also networks (ASNs such as `AS513`) for path alarms such as *suspected path element*, and perfSONAR host names only for the few alarms about hosts, such as *unresolvable host*.
+Hosts can't be added to the other events: their alarms never carry one, so it would never match. Events that have never raised an alarm suggest sites.
+The suggestions are the netsites, hosts and networks seen in perfSONAR traceroutes over the past month, plus the tags the event's alarms carried in the past week. A site or host that is missing has had no measurements for a month, so its perfSONAR toolkit is probably not working properly; the page points this out.
 You are alerted only about alarms that carry at least one of your tags; leave the tags empty to receive all of them.
 
 A tag can contain `*`, which stands for any characters: `*MWT2*` matches `MWT2_UC`, `MWT2_IU` and any other tag containing MWT2, and `*-LHCOPNE` every tag ending in -LHCOPNE.
@@ -143,12 +143,12 @@ The tag suggestions used when subscribing.
 
 `sites`, `hosts` and `asns` are every `src_netsite` / `dest_netsite`, `src_host` / `dest_host` and network (`asns`, as `AS<number>`) seen in perfSONAR traceroutes (`ps_trace`) over the past month. `labels` gives the network name of each ASN.
 
-`events` lists every event with alarms in the past week: `tags` are the tags those alarms carried and `kinds` the lists the event suggests, by what those tags are: `site` if any is a netsite, `host` if any is a host name, `asn` if any is an ASN.
-An event suggests its own `tags` plus the lists of its `kinds`; events not listed suggest `sites` and `hosts`.
+`events` lists every event that has alarms: `tags` are the tags its alarms carried in the past week, and `kinds` the lists it suggests, by what its latest alarms are tagged with: `site` if any tag is a netsite, `host` if any is a host name, `asn` if any is an ASN.
+An event suggests its own `tags` plus the lists of its `kinds`; events not listed suggest `sites`. Only events whose `kinds` include `host` take host names.
 
 #### GET /alarm/levels — List severity levels
 
-Returns every event whose alarms carry a `level`, with the levels seen. Only these events offer a level choice when subscribing.
+Returns every event whose alarms carry a `level`, with all the levels seen across alarm types: an event that has only raised `major` alarms so far still lists `minor`. Only these events offer a level choice when subscribing.
 
 ```json
 [

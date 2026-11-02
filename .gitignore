@@ -76,3 +76,5 @@ typings/
 
 # local helper for reading Elasticsearch through the tunnel
 helpers.py
+# Elasticsearch user and password for npm run dev
+creds.key

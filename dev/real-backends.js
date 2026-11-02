@@ -1,7 +1,7 @@
 // Local development on REAL data: `npm run dev`, then open http://localhost:8080.
 // Reads the production Elasticsearch through the tunnel (https://localhost:9200, or ES_HOST),
-// with credentials from ES_USER/ES_PASS or ES_CREDS_FILE (user and password on the first two
-// lines, as for helpers.py). Nothing is written to Elasticsearch:
+// with credentials from ES_USER/ES_PASS, ES_CREDS_FILE or creds.key in the project folder (user
+// and password on the first two lines, as for helpers.py). Nothing is written to Elasticsearch:
 // - you sign in as an in-memory user "dev-user"; its subscriptions, preferences and mutes are
 //   kept in memory only
 // - AAAS_DEV_USER_ID=<user id> views a real user's profile instead; saving it is refused,
@@ -21,12 +21,17 @@ const writeViewed = Boolean(viewAs) && process.env.AAAS_DEV_WRITE === '1';
 // shown as a badge on every page (see views/layout.pug)
 process.env.AAAS_DEV_BANNER = writeViewed ? `Real data · saving user ${viewAs}` : 'Real data · read-only';
 
+// creds.key in the project folder is used when neither is set (it is git-ignored)
+const LOCAL_CREDS = path.join(__dirname, '..', 'creds.key');
+
 function credentials() {
   if (process.env.ES_USER && process.env.ES_PASS) return [process.env.ES_USER, process.env.ES_PASS];
-  if (process.env.ES_CREDS_FILE) return fs.readFileSync(process.env.ES_CREDS_FILE, 'utf8').split('\n').map((l) => l.trim());
+  const file = process.env.ES_CREDS_FILE || (fs.existsSync(LOCAL_CREDS) ? LOCAL_CREDS : null);
+  if (file) return fs.readFileSync(file, 'utf8').split('\n').map((l) => l.trim());
   console.error('npm run dev reads the real Elasticsearch through the tunnel and needs ES_USER and ES_PASS,\n'
     + 'or ES_CREDS_FILE (user and password on the first two lines), e.g.\n'
     + '  ES_CREDS_FILE=~/workspace/AlarmsAndAlerts/creds.key npm run dev\n'
+    + 'or that file copied to creds.key in the project folder.\n'
     + 'For sample data without Elasticsearch: npm run dev:mock');
   process.exit(1);
 }

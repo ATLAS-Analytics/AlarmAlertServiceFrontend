@@ -87,13 +87,15 @@ const aggValues = {
   // networks on traceroute paths; 0 marks an unknown hop
   asns: [513, 2200, 39590, 786, 3, 0],
 };
-// aaas_alarms: the tags each event's alarms carried over the past year
+// aaas_alarms: the tags each event's alarms carried over the past week, and those of its latest
+// alarms (`latest`, the same when missing)
 const eventTags = [
   { category: 'Networking', subcategory: 'Sites', event: 'high packet loss', tags: ['MWT2', 'AGLT2', 'BNL-ATLAS', 'MWT2_UC'] },
   { category: 'Networking', subcategory: 'Sites', event: 'bandwidth decreased', tags: ['BNL-ATLAS', 'PIC-LHCOPNE'] },
   { category: 'Networking', subcategory: 'RENs', event: 'path changed', tags: ['MWT2', 'AGLT2', 'CERN-PROD', 'KIT-LHCONE'] },
   { category: 'Networking', subcategory: 'Network', event: 'suspected path element', tags: ['AS2200', 'AS513', 'CERN-PROD-LHCOPNE', 'UKI-NORTHGRID-MAN-HEP_SUBNETS'] },
-  { category: 'Networking', subcategory: 'Infrastructure', event: 'unresolvable host', tags: ['ps-latency.clumeq.mcgill.ca', 'bdw.scinet.utoronto.ca'] },
+  // no alarms this week, but its latest ones were tagged with hosts: suggests hosts
+  { category: 'Networking', subcategory: 'Infrastructure', event: 'unresolvable host', tags: [], latest: ['ps-latency.clumeq.mcgill.ca', 'bdw.scinet.utoronto.ca'] },
   // tagged with both sites and hosts: suggests both lists
   { category: 'Networking', subcategory: 'Infrastructure', event: 'hosts not found', tags: ['AGLT2_UM', 'psum01.aglt2.org'] },
   { category: 'Analytics', subcategory: 'Frontier', event: 'Failed queries', tags: ['atlasfrontier2-dev.cern.ch'] },
@@ -105,10 +107,10 @@ const eventTags = [
 const asnOwners = {
   513: 'CERN, CH', 2200: 'FR-RENATER Reseau National de telecommunications pour la Tec', 39590: 'NDGF High energy physicists community in the nordics., SE', 786: 'JANET Jisc Services Limited, GB', 3: 'MIT-GATEWAYS, US',
 };
-// events whose alarms carry a severity `level` (one with words, one with numbers)
+// events whose alarms carry a severity `level`; one has only raised major alarms so far
 const levelData = [
-  { category: 'Networking', subcategory: 'Sites', event: 'high packet loss', levels: ['warning', 'critical'] },
-  { category: 'Networking', subcategory: 'RENs', event: 'path changed', levels: [3, 1, 2] },
+  { category: 'Networking', subcategory: 'Sites', event: 'high packet loss', levels: ['minor', 'major'] },
+  { category: 'Networking', subcategory: 'RENs', event: 'path changed', levels: ['major'] },
 ];
 // recent alarms for the "Ongoing issues" panel, covering each filtering rule
 const minutesAgo = (m) => Date.now() - m * 60000;
@@ -116,11 +118,11 @@ const netAlarm = (subcategory, event, tags, level, m) => ({
   category: 'Networking', subcategory, event, tags, level, created_at: minutesAgo(m),
 });
 const recentAlarms = [
-  ...[20, 80, 140, 300, 600].map((m) => netAlarm('Sites', 'high packet loss', ['MWT2', 'BNL-ATLAS'], 'critical', m)),
-  // the test user only wants 'critical' for this event, so these are left out
-  ...[30, 90].map((m) => netAlarm('Sites', 'high packet loss', ['AGLT2'], 'warning', m)),
-  ...[45, 200, 400].map((m) => netAlarm('RENs', 'path changed', ['MWT2', 'AGLT2'], 2, m)),
-  netAlarm('RENs', 'path changed', ['CERN-PROD'], 1, 50),
+  ...[20, 80, 140, 300, 600].map((m) => netAlarm('Sites', 'high packet loss', ['MWT2', 'BNL-ATLAS'], 'major', m)),
+  // the test user only wants 'major' for this event, so these are left out
+  ...[30, 90].map((m) => netAlarm('Sites', 'high packet loss', ['AGLT2'], 'minor', m)),
+  ...[45, 200, 400].map((m) => netAlarm('RENs', 'path changed', ['MWT2', 'AGLT2'], 'major', m)),
+  netAlarm('RENs', 'path changed', ['CERN-PROD'], 'major', 50),
   // comma-separated subscription tags never match in alerts.py, so this is left out too
   netAlarm('Sites', 'bandwidth decreased', ['BNL-ATLAS'], undefined, 70),
   // heartbeat alarms have no tags and can't be muted per site
@@ -137,7 +139,7 @@ const users = {
     preferences: { vacation: false, mail_interval: 6 },
     subscriptions: [
       {
-        category: 'Networking', subcategory: 'Sites', event: 'high packet loss', tags: 'MWT2 AGLT2', levels: 'critical',
+        category: 'Networking', subcategory: 'Sites', event: 'high packet loss', tags: 'MWT2 AGLT2', levels: 'major',
       },
       { category: 'Networking', subcategory: 'Sites', event: 'bandwidth decreased', tags: 'BNL-ATLAS,SWT2_CPB' },
       { category: 'Networking', subcategory: 'RENs', event: 'path changed', tags: '*' },
@@ -198,9 +200,11 @@ class FakeES {
       return { hits: { total: { value: 0 }, hits: [] }, aggregations };
     }
     if (p.index === 'aaas_alarms' && p.aggs && p.aggs.events) {
-      // category|subcategory|event > tags aggregation (loadEventTags)
+      // category|subcategory|event > the past week's tags and the latest alarms (loadEventTags)
       const buckets = eventTags.map((e) => ({
-        key: [e.category, e.subcategory, e.event], tags: { buckets: e.tags.map((key) => ({ key, doc_count: 1 })) },
+        key: [e.category, e.subcategory, e.event],
+        week: { tags: { buckets: e.tags.map((key) => ({ key, doc_count: 1 })) } },
+        latest: { hits: { hits: (e.latest || e.tags).map((tag) => ({ _source: { tags: [tag] } })) } },
       }));
       return { hits: { total: { value: 0 }, hits: [] }, aggregations: { events: { buckets } } };
     }

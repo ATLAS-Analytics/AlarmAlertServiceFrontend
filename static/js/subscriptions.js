@@ -40,14 +40,14 @@
   // severity levels seen per event; only these events get a level picker
   const levelsByKey = new Map((data.levels || []).map((e) => [keyOf(e), e.levels]));
 
-  // alerts.py splits subscription tags and levels on spaces and treats '*' (or a
-  // missing value) as "all"; older entries may hold arrays or comma-separated strings.
+  // alerts.py splits subscription tags and levels on spaces, treats '*' (or a missing value)
+  // as "all" and ignores case; older entries may hold arrays or comma-separated strings.
   function parseList(value) {
     const raw = Array.isArray(value) ? value : [value];
     const out = [];
     raw.forEach((t) => {
       String(t === undefined || t === null ? '' : t).split(/[\s,]+/).forEach((v) => {
-        if (v && v !== '*' && !out.includes(v)) out.push(v);
+        if (v && v !== '*' && !out.some((o) => o.toLowerCase() === v.toLowerCase())) out.push(v);
       });
     });
     return out;
@@ -76,16 +76,18 @@
   let flashKeys = [];
 
   // tag suggestions (/alarm/tags): the traceroute sites, hosts and ASNs, and per event the
-  // kinds of tags its alarms carry plus those tags; events without alarms suggest sites
+  // kinds of tags its alarms carry plus those tags; events without alarms this week could be
+  // tagged with either sites or hosts, so they suggest both
   let tagLists = { site: [], host: [], asn: [] };
   let seenTags = new Map(); // every site, host and ASN of the past month: lower case -> canonical
+  let seenKinds = new Map(); // and what it is: lower case -> 'site', 'host' or 'asn'
   let eventTags = new Map();
   const suggestionsByKey = new Map();
   let tagLabels = {}; // network names of ASN tags, e.g. { AS513: 'CERN, CH' }
   let tagsState = 'loading';
   const KIND_NAMES = { site: ['site', 'sites'], host: ['host', 'hosts'], asn: ['ASN', 'ASNs'] };
 
-  const kindsOf = (sub) => (eventTags.has(keyOf(sub)) ? eventTags.get(keyOf(sub)).kinds : ['site']);
+  const kindsOf = (sub) => (eventTags.has(keyOf(sub)) ? eventTags.get(keyOf(sub)).kinds : ['site', 'host']);
   // 'site', 'site or ASN', 'host', or 'tag' for events whose tags are none of these
   function tagNoun(sub, plural) {
     const kinds = kindsOf(sub);
@@ -108,7 +110,7 @@
     return suggestionsByKey.get(key);
   }
 
-  // network alarms tag ASNs as 'AS<number>' and alerts.py matches exactly, so 'as513' becomes 'AS513'
+  // network alarms tag ASNs as 'AS<number>', so 'as513' is shown as 'AS513'
   function normalizeTag(value) {
     const v = String(value).trim();
     const asn = v.match(/^as(\d+)$/i);
@@ -116,11 +118,11 @@
   }
   const tagFields = new Set();
 
-  // like alerts.py, a tag with '*' is a pattern: '*' stands for any characters, case-insensitively
+  // like alerts.py, tags match ignoring case and '*' in a tag (a pattern) stands for any characters
   const isPattern = (tag) => tag.includes('*');
   const patternRegex = (pattern) => new RegExp(`^${pattern.split('*').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, 'i');
   // what a pattern matches: the event's suggestions or, failing that, anything perfSONAR saw
-  // (e.g. a host pattern on an event without alarms this week, which suggests sites)
+  // (e.g. a host pattern on an event whose alarms this week were tagged with sites)
   function patternMatches(sub, pattern) {
     const regex = patternRegex(pattern);
     const suggested = suggestionsFor(sub).list.filter((t) => regex.test(t));
@@ -130,6 +132,24 @@
   // why a tag isn't suggested: sites, hosts and ASNs come from a month of perfSONAR traceroutes,
   // the tags of other events from their alarms of the past week
   const notSeen = (sub) => (kindsOf(sub).length ? 'not seen in perfSONAR in the past month' : 'not seen in its alarms in the past week');
+  const HOST_TAG = /^([a-z0-9-]+\.)+[a-z]{2,}$|^\d{1,3}(\.\d{1,3}){3}$|^[0-9a-f]*:[0-9a-f:]+$/i;
+  // what a tag is: a site, host or ASN seen in perfSONAR, else judged by its form
+  function kindOfTag(sub, tag) {
+    if (seenKinds.has(tag.toLowerCase())) return seenKinds.get(tag.toLowerCase());
+    if (/^AS\d+$/.test(tag)) return 'asn';
+    if (HOST_TAG.test(tag)) return 'host';
+    return kindsOf(sub).includes('site') ? 'site' : 'tag';
+  }
+  // e.g. '2 sites, 3 hosts'
+  function countByKind(sub, tags) {
+    const counts = new Map();
+    tags.forEach((t) => {
+      const kind = kindOfTag(sub, t);
+      counts.set(kind, (counts.get(kind) || 0) + 1);
+    });
+    return ['site', 'host', 'asn', 'tag'].filter((k) => counts.has(k))
+      .map((k) => `${counts.get(k)} ${(KIND_NAMES[k] || ['tag', 'tags'])[counts.get(k) === 1 ? 0 : 1]}`).join(', ');
+  }
   const listText = (items, max = 8) => items.slice(0, max).join(', ') + (items.length > max ? ` and ${items.length - max} more` : '');
 
   // ---- catalog tree ------------------------------------------------------
@@ -371,7 +391,7 @@
       const value = normalizeTag(raw);
       if (!value || value === '*') return;
       const tag = known().get(value.toLowerCase()) || seenTags.get(value.toLowerCase()) || value;
-      if (sub.tags.includes(tag)) return;
+      if (sub.tags.some((t) => t.toLowerCase() === tag.toLowerCase())) return;
       sub.tags.push(tag);
       renderChips();
       updateSavebar();
@@ -416,15 +436,15 @@
       options = [];
 
       if (tagsState === 'ready') {
-        const chosen = new Set(sub.tags);
+        const chosen = new Set(sub.tags.map((t) => t.toLowerCase()));
         const prefix = [];
         const inner = [];
         const byName = []; // ASNs whose network name matches, e.g. 'cern' -> AS513
         // a typed pattern (e.g. *MWT2*) lists what it matches, and is offered first
         const pattern = isPattern(typed) && typed !== '*' ? patternRegex(typed) : null;
         suggestions().forEach((t) => {
-          if (chosen.has(t)) return;
           const l = t.toLowerCase();
+          if (chosen.has(l)) return;
           if (pattern) {
             if (pattern.test(t)) prefix.push(t);
           } else if (!q || l.startsWith(q)) prefix.push(t);
@@ -437,20 +457,24 @@
         // a network name typed as a tag would never match, so don't offer it when names matched
         const onlyNames = byName.length > 0 && prefix.length === 0 && inner.length === 0;
         if (pattern) {
-          if (!chosen.has(typed)) options.unshift({ value: typed, pattern: patternMatches(sub, typed).length });
-        } else if (q && !onlyNames && !known().has(typedTag.toLowerCase()) && !chosen.has(typedTag)) {
+          if (!chosen.has(q)) options.unshift({ value: typed, matches: patternMatches(sub, typed) });
+        } else if (q && !onlyNames && !known().has(typedTag.toLowerCase()) && !chosen.has(typedTag.toLowerCase())) {
           options.push({ value: typedTag, custom: true });
         }
 
+        // where sites and hosts are both suggested, hosts are marked as such
+        const mixed = kindsOf(sub).includes('host') && kindsOf(sub).length > 1;
         options.forEach((opt, i) => {
           const li = el('li', 'suggestion');
           li.id = `${listId}-${i}`;
           li.setAttribute('role', 'option');
-          if (opt.pattern !== undefined) {
-            const n = opt.pattern;
-            li.append(el('span', '', `Add pattern “${opt.value}”`), el('span', 'suggestion-hint', n ? `matches ${n}` : 'matches nothing seen recently'));
+          if (opt.matches) {
+            const hint = opt.matches.length ? `matches ${countByKind(sub, opt.matches)}` : 'matches nothing seen recently';
+            li.append(el('span', '', `Add pattern “${opt.value}”`), el('span', 'suggestion-hint', hint));
           } else if (opt.custom) {
-            li.append(el('span', '', `Add “${opt.value}”`), el('span', 'suggestion-hint', isKnown(sub, opt.value) ? 'seen in perfSONAR' : notSeen(sub)));
+            // e.g. a host typed for an event whose alarms this week were tagged with sites
+            const kind = seenKinds.get(opt.value.toLowerCase());
+            li.append(el('span', '', `Add “${opt.value}”`), el('span', 'suggestion-hint', kind ? `${KIND_NAMES[kind][0]} seen in perfSONAR` : notSeen(sub)));
           } else {
             const at = opt.value.toLowerCase().indexOf(q);
             const label = el('span');
@@ -461,6 +485,7 @@
             }
             li.append(label);
             if (tagLabels[opt.value]) li.append(el('span', 'suggestion-hint', tagLabels[opt.value]));
+            else if (mixed && kindOfTag(sub, opt.value) === 'host') li.append(el('span', 'suggestion-hint', 'host'));
           }
           li.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the input
           li.addEventListener('click', () => choose(i));
@@ -476,7 +501,10 @@
 
       listbox.hidden = listbox.childElementCount === 0;
       input.setAttribute('aria-expanded', String(!listbox.hidden));
-      setActive(q && options.length ? 0 : -1);
+      // Enter takes the first option, except for a typed pattern that is already chosen: then it
+      // would add the first tag the pattern matches
+      const chosenPattern = isPattern(typed) && options.length > 0 && !options[0].matches;
+      setActive(q && options.length && !chosenPattern ? 0 : -1);
     }
 
     input.addEventListener('focus', update);
@@ -985,6 +1013,7 @@
     }) => {
       tagLists = { site: sites, host: hosts, asn: asns };
       seenTags = new Map([...sites, ...hosts, ...asns].map((t) => [t.toLowerCase(), t]));
+      seenKinds = new Map([[sites, 'site'], [hosts, 'host'], [asns, 'asn']].flatMap(([list, kind]) => list.map((t) => [t.toLowerCase(), kind])));
       eventTags = new Map(events.map((e) => [keyOf(e), e]));
       tagLabels = labels || {};
       tagsState = 'ready';

@@ -201,7 +201,7 @@ const loadEventTags = cached(TAGS_TTL, async () => {
 // For each event that had alarms in the past week, `events` holds its own tags and `kinds`:
 // which traceroute lists it suggests, by what those tags are. 'site' if any is a netsite,
 // 'host' if any is a host name, 'asn' if any is a network; none for e.g. user names.
-// Events missing from `events` suggest sites.
+// Events missing from `events` could be tagged with either, so they suggest sites and hosts.
 async function loadTagSuggestions() {
   const [trace, alarmTags] = await Promise.all([loadTraceTags(), loadEventTags()]);
   const netsites = new Set(trace.sites.map((t) => t.toLowerCase()));
@@ -281,10 +281,9 @@ async function loadAlarmLevels() {
   return levelsCache.levels;
 }
 
-// same rules as tag_matched() in alerts.py: a subscription tag matches an alarm tag exactly or,
-// if it contains '*', case-insensitively with '*' standing for any characters (*MWT2* matches MWT2_UC)
+// same rules as tag_matched() in alerts.py: a subscription tag matches an alarm tag ignoring
+// case, and '*' in it stands for any characters (*MWT2* matches MWT2_UC)
 function tagMatches(pattern, tag) {
-  if (!pattern.includes('*')) return pattern === tag;
   const regex = pattern.split('*').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
   return new RegExp(`^${regex}$`, 'i').test(tag);
 }

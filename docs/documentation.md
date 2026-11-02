@@ -22,11 +22,12 @@ ATLAS Alarm & Alert Service provides a simple way to store generated alarms, han
 On the [Subscriptions](/subscriptions) page, tick the events you want to hear about.
 Each subscription can be narrowed down with **tags**: usually network-site names.
 The suggestions follow what the event's alarms of the past week are tagged with: perfSONAR netsites for most network alarms, also networks (ASNs such as `AS513`) for path alarms such as *suspected path element*, and perfSONAR host names for alarms about hosts such as *unresolvable host*.
+Events without alarms in the past week could be tagged with either, so they suggest both sites and hosts.
 They are the netsites, hosts and networks seen in perfSONAR traceroutes over the past month. A site or host that is missing has had no measurements for a month, so its perfSONAR toolkit is probably not working properly; the page points this out.
 You are alerted only about alarms that carry at least one of your tags; leave the tags empty to receive all of them.
 
 A tag can contain `*`, which stands for any characters: `*MWT2*` matches `MWT2_UC`, `MWT2_IU` and any other tag containing MWT2, and `*-LHCOPNE` every tag ending in -LHCOPNE.
-Patterns ignore upper and lower case; plain tags must match exactly.
+Tags and patterns ignore upper and lower case.
 
 Events whose alarms report a severity also let you pick the **levels** you want; by default you get all of them.
 
@@ -143,7 +144,7 @@ The tag suggestions used when subscribing.
 `sites`, `hosts` and `asns` are every `src_netsite` / `dest_netsite`, `src_host` / `dest_host` and network (`asns`, as `AS<number>`) seen in perfSONAR traceroutes (`ps_trace`) over the past month. `labels` gives the network name of each ASN.
 
 `events` lists every event with alarms in the past week: `tags` are the tags those alarms carried and `kinds` the lists the event suggests, by what those tags are: `site` if any is a netsite, `host` if any is a host name, `asn` if any is an ASN.
-An event suggests its own `tags` plus the lists of its `kinds`; events not listed suggest `sites`.
+An event suggests its own `tags` plus the lists of its `kinds`; events not listed suggest `sites` and `hosts`.
 
 #### GET /alarm/levels — List severity levels
 
@@ -259,7 +260,7 @@ Only preferences supported by the deployed system are allowed.
 
 The body is the complete list of the user’s subscriptions; an empty array unsubscribes from everything.
 `tags` and `levels` are space-separated strings, or `"*"` for all.
-A tag containing `*` is a pattern, e.g. `"*MWT2* CERN-PROD-LHCOPNE"`: `*` stands for any characters and the match ignores case.
+Tags match ignoring case, and a tag containing `*` is a pattern, e.g. `"*MWT2* CERN-PROD-LHCOPNE"`: `*` stands for any characters.
 `levels` is optional; when missing, all levels are sent.
 
 #### POST /user/acknowledgements/:userId — Update acknowledged issues

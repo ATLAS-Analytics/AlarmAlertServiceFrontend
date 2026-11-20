@@ -196,7 +196,7 @@ Returns every event whose alarms carry a `level`, with all the levels seen acros
 
 #### POST /alarm/fetch — List alarms
 
-`period` is a number of hours.
+`period` is a number of hours: alarms are returned from the start of the hour that many hours ago, oldest first, up to 10,000.
 
 ```json
 {

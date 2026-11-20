@@ -468,9 +468,12 @@ router.post('/fetch', jsonParser, async (req, res) => {
   console.log('Getting alarms in:', category, '/', subcategory, '/', event, '/', period);
   const alarms = [];
   try {
+    // alerts.py emails what this returns: a day of one event has had 1450 alarms,
+    // and 10000 is as many as one search can return
     const response = await es.search({
       index: esAlarmsIndex,
-      size: 1000,
+      size: 10000,
+      sort: [{ created_at: 'asc' }],
       query: {
         bool: {
           must: [{

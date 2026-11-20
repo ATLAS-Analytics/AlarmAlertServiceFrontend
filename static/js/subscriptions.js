@@ -717,6 +717,8 @@
       saved = { subs: clone(subs), snapshot: snapshot() };
       updateSavebar();
       toast('Subscriptions saved');
+      // Ongoing issues are loaded on the server for the saved subscriptions.
+      window.location.reload();
     } catch (err) {
       console.error('saving subscriptions failed:', err);
       toast('Couldn’t save your subscriptions. Please try again.', 'error');
